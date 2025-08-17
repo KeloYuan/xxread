@@ -85,7 +85,11 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           throw Exception('分页失败，无法生成有效页面');
         }
 
-        if (mounted) setState(() {});
+        if (mounted) {
+          setState(() {});
+          // 初始加载完成后，短暂显示工具栏提示用户
+          _showControlsInitially();
+        }
       } else {
         throw Exception('书籍内容为空，无法加载');
       }
@@ -95,6 +99,15 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         setState(() => _pages = ['$_kErrorPrefix 书籍加载失败: $e\n\n请检查文件是否存在或格式是否正确']);
       }
     }
+  }
+  
+  void _showControlsInitially() {
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted && !_showControls) {
+        setState(() => _showControls = true);
+        _startHideControlsTimer();
+      }
+    });
   }
 
   Future<void> _loadBookContent() async {
@@ -231,7 +244,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       final screenSize = MediaQuery.of(context).size;
       final padding = MediaQuery.of(context).padding;
       final double availableWidth = screenSize.width - (_pageMargin * 2);
-      final double availableHeight = screenSize.height - padding.top - padding.bottom - 120;
+      final double availableHeight = screenSize.height - padding.top - padding.bottom - 200; // 增加预留空间避免内容被截断
 
       final textStyle = TextStyle(
         fontSize: _fontSize,
@@ -246,6 +259,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           .replaceAll(RegExp(r'\n\s*\n\s*\n+'), '\n\n')
           .trim();
 
+      // 改进段落处理逻辑，确保不丢失内容
       final paragraphs = cleanContent.split('\n');
       final List<String> processedParagraphs = [];
       for (final paragraph in paragraphs) {
@@ -253,17 +267,27 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         if (trimmed.isNotEmpty) {
           processedParagraphs.add(trimmed);
         } else {
-          if (processedParagraphs.isNotEmpty && processedParagraphs.last.isNotEmpty) {
+          // 保留空行作为段落分隔，但避免连续多个空行
+          if (processedParagraphs.isNotEmpty && processedParagraphs.last != '') {
             processedParagraphs.add('');
           }
         }
+      }
+      
+      // 确保最后不是空行
+      while (processedParagraphs.isNotEmpty && processedParagraphs.last == '') {
+        processedParagraphs.removeLast();
       }
 
       final List<String> currentPageContent = [];
 
       for (int i = 0; i < processedParagraphs.length; i++) {
         final paragraph = processedParagraphs[i];
-        final testContent = [...currentPageContent, paragraph].join('\n\n');
+        
+        // 创建测试内容，使用实际的连接方式
+        final testContent = currentPageContent.isEmpty 
+            ? paragraph 
+            : '${currentPageContent.join('\n\n')}\n\n$paragraph';
 
         final painter = TextPainter(
           text: TextSpan(text: testContent, style: textStyle),
@@ -274,8 +298,12 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         final textHeight = painter.size.height;
 
         if (textHeight > availableHeight && currentPageContent.isNotEmpty) {
+          // 当前页面已满，保存并开始新页面
           final pageText = currentPageContent.join('\n\n').trim();
-          if (pageText.isNotEmpty) _pages.add(pageText);
+          if (pageText.isNotEmpty) {
+            _pages.add(pageText);
+            debugPrint('添加页面 ${_pages.length}: ${pageText.length} 字符');
+          }
           currentPageContent.clear();
           currentPageContent.add(paragraph);
         } else {
@@ -293,14 +321,24 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           final longParagraph = currentPageContent[0];
           currentPageContent.clear();
 
-          // 使用正则将文本拆分为“句子+可能的终止标点”
-          final sentenceMatches = RegExp(r'[^。！？；.!?]+[。！？；.!?]?\s*')
+          // 使用正则将文本拆分为"句子+可能的终止标点"，如果没有匹配到任何句子，按字符拆分
+          var sentenceMatches = RegExp(r'[^。！？；.!?]+[。！？；.!?]?\s*')
               .allMatches(longParagraph)
               .map((m) => m.group(0)!)
               .toList();
+          
+          // 如果正则没有匹配到任何内容，按固定字符数拆分
+          if (sentenceMatches.isEmpty || sentenceMatches.join('').length < longParagraph.length * 0.8) {
+            const chunkSize = 100; // 每块100个字符
+            sentenceMatches.clear();
+            for (int i = 0; i < longParagraph.length; i += chunkSize) {
+              final end = (i + chunkSize < longParagraph.length) ? i + chunkSize : longParagraph.length;
+              sentenceMatches.add(longParagraph.substring(i, end));
+            }
+          }
 
           for (final part in sentenceMatches) {
-            final test = [...currentPageContent, part].join('');
+            final test = currentPageContent.isEmpty ? part : '${currentPageContent.join('')}$part';
             final p = TextPainter(
               text: TextSpan(text: test, style: textStyle),
               textDirection: TextDirection.ltr,
@@ -309,7 +347,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
             if (p.size.height > availableHeight && currentPageContent.isNotEmpty) {
               final pageText = currentPageContent.join('').trim();
-              if (pageText.isNotEmpty) _pages.add(pageText);
+              if (pageText.isNotEmpty) {
+                _pages.add(pageText);
+                debugPrint('添加长段落分页 ${_pages.length}: ${pageText.length} 字符');
+              }
               currentPageContent.clear();
             }
             currentPageContent.add(part);
@@ -317,16 +358,29 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         }
       }
 
+      // 确保最后的内容也被添加
       if (currentPageContent.isNotEmpty) {
         final last = currentPageContent.join('\n\n').trim();
-        if (last.isNotEmpty) _pages.add(last);
+        if (last.isNotEmpty) {
+          _pages.add(last);
+          debugPrint('添加最后页面 ${_pages.length}: ${last.length} 字符');
+        }
       }
 
       if (_pages.isEmpty) {
         _pages = [cleanContent.isNotEmpty ? cleanContent : '内容加载完成但无法显示'];
       }
 
-      debugPrint('真实分页完成: 总共 ${_pages.length} 页，平均每页 ${(cleanContent.length / _pages.length).toStringAsFixed(0)} 字符');
+      // 验证内容完整性
+      final totalContentInPages = _pages.join('').replaceAll(RegExp(r'\s+'), '');
+      final originalContentClean = cleanContent.replaceAll(RegExp(r'\s+'), '');
+      final contentLossPercent = ((originalContentClean.length - totalContentInPages.length) / originalContentClean.length * 100);
+      
+      debugPrint('真实分页完成: 总共 ${_pages.length} 页');
+      debugPrint('原始内容长度: ${cleanContent.length} 字符');
+      debugPrint('分页后内容长度: ${_pages.join('').length} 字符');
+      debugPrint('内容丢失率: ${contentLossPercent.toStringAsFixed(2)}%');
+      debugPrint('平均每页: ${(cleanContent.length / _pages.length).toStringAsFixed(0)} 字符');
 
       if (_currentPageIndex >= _pages.length) {
         _currentPageIndex = _pages.isNotEmpty ? _pages.length - 1 : 0;
@@ -441,7 +495,12 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   void _onPageTurn() {
     if (!mounted) return;
-    _hideControls();
+    
+    // 不立即隐藏控件，让用户有时间看到页面变化
+    if (_showControls) {
+      _startHideControlsTimer(); // 重新开始计时而不是立即隐藏
+    }
+    
     try {
       _bookDao.updateBookProgress(widget.book.id!, _currentPageIndex);
     } catch (e) {
@@ -579,7 +638,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           }
         },
         physics: const ClampingScrollPhysics(),
-      );
+      ),
+    );
   }
 
   void _handleHorizontalDragEnd(DragEndDetails details) {
@@ -712,10 +772,13 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildTopBar() {
+    final double statusBarHeight = MediaQuery.of(context).padding.top;
+    final double topBarHeight = statusBarHeight + 80; // 状态栏高度 + 工具栏高度
+    
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 600),
       curve: _showControls ? Curves.easeOutExpo : Curves.easeInExpo,
-      top: _showControls ? 0 : -120,
+      top: _showControls ? 0 : -topBarHeight,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
@@ -867,14 +930,18 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _buildBottomToolbar() {
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
+    final double bottomToolbarHeight = 150 + bottomPadding; // 工具栏高度 + 底部安全区域
+    
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 700),
       curve: _showControls ? Curves.easeOutExpo : Curves.easeInExpo,
-      bottom: _showControls ? 0 : -250,
+      bottom: _showControls ? 0 : -bottomToolbarHeight,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
@@ -972,7 +1039,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _buildToolbarButtons() {
@@ -1335,9 +1403,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                     ),
                   ),
                 ),
-              );
-            },
-          );
+              ),
+            );
+          },
+        );
       },
     ).whenComplete(() {
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -1558,12 +1627,39 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     );
   }
 
+  Timer? _autoScrollTimer;
+  
   void _toggleAutoScroll() {
     setState(() {
       _autoScroll = !_autoScroll;
     });
     _saveSetting((p) => p.setBool('autoScroll', _autoScroll));
-    // TODO: 实现自动滚动逻辑
+    
+    if (_autoScroll) {
+      _startAutoScroll();
+    } else {
+      _stopAutoScroll();
+    }
+  }
+  
+  void _startAutoScroll() {
+    _stopAutoScroll(); // 确保之前的定时器被清除
+    _autoScrollTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (_currentPageIndex < _pages.length - 1) {
+        _pageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        // 到达最后一页，停止自动滚动
+        _toggleAutoScroll();
+      }
+    });
+  }
+  
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
   }
 
   Widget _buildTableOfContentsPanel() {
@@ -1685,14 +1781,15 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                 title: const Text('搜索', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
-                  // TODO: 搜索功能
+                  _showSearchDialog();
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.share, color: Colors.white),
                 title: const Text('分享', style: TextStyle(color: Colors.white)),
                 onTap: () {
-                  // TODO: 分享功能
+                  Navigator.pop(context);
+                  _shareCurrentPage();
                 },
               ),
               const SizedBox(height: 20),
@@ -1749,6 +1846,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
+    _autoScrollTimer?.cancel();
     _pageController.dispose();
 
     SystemChrome.setEnabledSystemUIMode(
@@ -1763,6 +1861,99 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       }
     }
     super.dispose();
+  }
+  
+  void _showSearchDialog() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.7),
+      builder: (context) {
+        String searchQuery = '';
+        return AlertDialog(
+          backgroundColor: Colors.black.withValues(alpha: 0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('搜索内容', style: TextStyle(color: Colors.white)),
+          content: TextField(
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: '输入要搜索的内容...',
+              hintStyle: TextStyle(color: Colors.grey),
+              enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey),
+              ),
+              focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.white),
+              ),
+            ),
+            onChanged: (value) => searchQuery = value,
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消', style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                if (searchQuery.isNotEmpty) {
+                  _searchInBook(searchQuery);
+                }
+              },
+              child: const Text('搜索', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  void _searchInBook(String query) {
+    for (int i = 0; i < _pages.length; i++) {
+      if (_pages[i].toLowerCase().contains(query.toLowerCase())) {
+        _pageController.animateToPage(
+          i,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('在第 ${i + 1} 页找到："$query"'),
+            backgroundColor: Colors.black.withValues(alpha: 0.8),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('未找到："$query"'),
+        backgroundColor: Colors.red.withValues(alpha: 0.8),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+  
+  void _shareCurrentPage() {
+    if (_pages.isNotEmpty && _currentPageIndex < _pages.length) {
+      final currentPageContent = _pages[_currentPageIndex];
+      final bookInfo = '《${widget.book.title}》- ${widget.book.author}';
+      final shareText = '$bookInfo\n\n第${_currentPageIndex + 1}页:\n\n$currentPageContent';
+      
+      // 复制到剪贴板
+      Clipboard.setData(ClipboardData(text: shareText));
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前页面内容已复制到剪贴板'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }
 
