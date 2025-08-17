@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(flutter pub:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(flutter:*)",
+      "Bash(sed:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:localhost)",
+      "Bash(mv:*)",
+      "Bash(dart format:*)"
+    ],
+    "deny": [],
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "F:\\f"
+    ]
+  }
+}
