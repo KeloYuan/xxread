@@ -61,6 +61,11 @@ The app follows a layered architecture:
 4. **Utilities** (`lib/utils/`): Helper functions and extensions
    - `responsive_helper.dart` - Responsive design utilities
    - `color_extensions.dart` - Color manipulation extensions
+   - `text_selection_helper.dart` - Text selection utilities
+
+5. **Widget Components** (`lib/widgets/`): Reusable UI components
+   - `note_dialog.dart` - Note editing dialog
+   - `text_selection_toolbar.dart` - Custom text selection toolbar
 
 ### Database Design
 The app uses SQLite with five main tables:
@@ -132,3 +137,9 @@ Navigation adapts based on screen size:
 - Supports multiple book formats (EPUB, PDF, TXT)
 - File validation and metadata extraction
 - Error handling for unsupported formats
+
+### Text Selection and Annotation Features
+- Text highlighting with color support
+- Note-taking functionality with text references
+- Custom text selection toolbar
+- Position-based highlight storage for accurate rendering

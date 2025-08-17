@@ -579,8 +579,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           }
         },
         physics: const ClampingScrollPhysics(),
-      ),
-    );
+      );
   }
 
   void _handleHorizontalDragEnd(DragEndDetails details) {
@@ -1500,8 +1499,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                 });
                 setState(() {});
                 _saveSetting((p) {
-                  p.setInt('backgroundColor', (_backgroundColor).value);
-                  p.setInt('fontColor', (_fontColor).value);
+                  p.setInt('backgroundColor', (_backgroundColor).toARGB32());
+                  p.setInt('fontColor', (_fontColor).toARGB32());
                 });
               },
               child: Container(
@@ -1707,7 +1706,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   String _getPagePreview(int pageIndex) {
     if (pageIndex >= _pages.length) return '';
     final content = _pages[pageIndex];
-    final preview = content.length > 50 ? content.substring(0, 50) + '...' : content;
+    final preview = content.length > 50 ? '${content.substring(0, 50)}...' : content;
     return preview.replaceAll('\n', ' ');
   }
 
