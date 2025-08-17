@@ -20,7 +20,11 @@ version: 1.0.0+1
 
 environment:
   sdk: ^3.8.1
-
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "lib/assets/images/icon.png"
+  adaptive_icon_background: "#FFFFFF"
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -28,11 +32,6 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
-  flutter_launcher_icons:
-    android: "launcher_icon"
-    ios: ture
-    image_path: "lib/assets/images/icon.png"
-    adaptive_icon_background: "#FFFFFF"
   flutter:
     sdk: flutter
 
