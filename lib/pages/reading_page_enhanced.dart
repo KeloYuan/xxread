@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book.dart';
 import '../services/book_dao.dart';
 import '../services/reading_stats_dao.dart';
+import '../widgets/custom_slider_components.dart';
+import '../utils/responsive_helper.dart';
 
 class ReadingPageEnhanced extends StatefulWidget {
   final Book book;
@@ -41,6 +43,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   double _lineSpacing = 1.8;
   double _letterSpacing = 0.2;
   double _pageMargin = 16.0;
+  double _horizontalPadding = 16.0;  // 新增：左右留白距离
   Color _backgroundColor = Colors.white;
   Color _fontColor = Colors.black87;
   bool _autoScroll = false;
@@ -230,7 +233,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   void _splitIntoPages() {
-    debugPrint('开始真实分页处理...');
+    debugPrint('🔄 开始标准化分页处理...');
 
     if (_bookContent.isEmpty) {
       _pages = ['内容为空'];
@@ -238,166 +241,101 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       return;
     }
 
-    try {
-      _pages.clear();
+    _pages.clear();
 
-      final screenSize = MediaQuery.of(context).size;
-      final padding = MediaQuery.of(context).padding;
-      final double availableWidth = screenSize.width - (_pageMargin * 2);
-      final double availableHeight = screenSize.height - padding.top - padding.bottom - 200; // 增加预留空间避免内容被截断
+    // 使用标准化分页算法，避免设备差异
+    _standardizedPagination(_bookContent);
 
-      final textStyle = TextStyle(
-        fontSize: _fontSize,
-        fontFamily: _fontFamily == 'System' ? null : _fontFamily,
-        height: _lineSpacing,
-        color: _fontColor,
-        letterSpacing: _letterSpacing,
-      );
+    if (_currentPageIndex >= _pages.length) {
+      _currentPageIndex = _pages.isNotEmpty ? _pages.length - 1 : 0;
+    }
 
-      final cleanContent = _bookContent
-          .replaceAll(RegExp(r'\r\n|\r'), '\n')
-          .replaceAll(RegExp(r'\n\s*\n\s*\n+'), '\n\n')
-          .trim();
-
-      // 改进段落处理逻辑，确保不丢失内容
-      final paragraphs = cleanContent.split('\n');
-      final List<String> processedParagraphs = [];
-      for (final paragraph in paragraphs) {
-        final trimmed = paragraph.trim();
-        if (trimmed.isNotEmpty) {
-          processedParagraphs.add(trimmed);
-        } else {
-          // 保留空行作为段落分隔，但避免连续多个空行
-          if (processedParagraphs.isNotEmpty && processedParagraphs.last != '') {
-            processedParagraphs.add('');
-          }
+    // 更新数据库页数
+    if (_pages.length != widget.book.totalPages) {
+      Future.microtask(() {
+        try {
+          _bookDao.updateBookTotalPages(widget.book.id!, _pages.length);
+        } catch (e) {
+          debugPrint('更新书籍页数失败: $e');
         }
-      }
-      
-      // 确保最后不是空行
-      while (processedParagraphs.isNotEmpty && processedParagraphs.last == '') {
-        processedParagraphs.removeLast();
-      }
+      });
+    }
+  }
 
-      final List<String> currentPageContent = [];
+  // 标准化分页算法 - 统一不同设备的分页结果
+  void _standardizedPagination(String content) {
+    debugPrint('📱 开始标准化分页...');
+    
+    // 获取设备信息
+    final screenSize = MediaQuery.of(context).size;
+    final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
+    
+    debugPrint('📱 设备信息: 屏幕${screenSize.width}x${screenSize.height}, DPR$devicePixelRatio');
+    
+    // 标准化字符数计算 - 基于逻辑像素而非物理像素
+    final logicalWidth = screenSize.width;
+    final logicalHeight = screenSize.height;
+    
+    // 基于逻辑尺寸计算每页字符数
+    int charsPerPage;
+    if (logicalWidth > 600) {
+      // 平板或横屏
+      charsPerPage = 800;
+    } else if (logicalHeight > 700) {
+      // 长屏手机
+      charsPerPage = 600;
+    } else {
+      // 标准手机
+      charsPerPage = 500;
+    }
+    
+    // 根据字体大小调整
+    final fontScale = _fontSize / 18.0; // 18为基准字体大小
+    charsPerPage = (charsPerPage / fontScale).round();
+    
+    // 确保在合理范围内
+    charsPerPage = charsPerPage.clamp(400, 1000);
+    
+    debugPrint('📊 标准化分页: 每页$charsPerPage字符 (逻辑尺寸${logicalWidth}x$logicalHeight)');
+    
+    // 执行分页
+    for (int i = 0; i < content.length; i += charsPerPage) {
+      final end = (i + charsPerPage < content.length) ? i + charsPerPage : content.length;
+      _pages.add(content.substring(i, end));
+    }
+    
+    debugPrint('✅ 标准化分页完成: 总共 ${_pages.length} 页');
+    
+    // 验证分页结果
+    final avgCharsPerPage = content.length / _pages.length;
+    debugPrint('📈 平均每页: ${avgCharsPerPage.toStringAsFixed(0)} 字符');
+    
+    if (_pages.length < 10 && content.length > 5000) {
+      debugPrint('⚠️ 页数可能过少，使用保险分页');
+      _ultimateFallbackPagination(content);
+    }
+  }
 
-      for (int i = 0; i < processedParagraphs.length; i++) {
-        final paragraph = processedParagraphs[i];
-        
-        // 创建测试内容，使用实际的连接方式
-        final testContent = currentPageContent.isEmpty 
-            ? paragraph 
-            : '${currentPageContent.join('\n\n')}\n\n$paragraph';
 
-        final painter = TextPainter(
-          text: TextSpan(text: testContent, style: textStyle),
-          textDirection: TextDirection.ltr,
-          maxLines: null,
-        )..layout(maxWidth: availableWidth);
-
-        final textHeight = painter.size.height;
-
-        if (textHeight > availableHeight && currentPageContent.isNotEmpty) {
-          // 当前页面已满，保存并开始新页面
-          final pageText = currentPageContent.join('\n\n').trim();
-          if (pageText.isNotEmpty) {
-            _pages.add(pageText);
-            debugPrint('添加页面 ${_pages.length}: ${pageText.length} 字符');
-          }
-          currentPageContent.clear();
-          currentPageContent.add(paragraph);
-        } else {
-          currentPageContent.add(paragraph);
-        }
-
-        // 处理超长段落：按句子智能拆分（保留标点）
-        final painterForSingle = TextPainter(
-          text: TextSpan(text: currentPageContent.join('\n\n'), style: textStyle),
-          textDirection: TextDirection.ltr,
-          maxLines: null,
-        )..layout(maxWidth: availableWidth);
-
-        if (painterForSingle.size.height > availableHeight && currentPageContent.length == 1) {
-          final longParagraph = currentPageContent[0];
-          currentPageContent.clear();
-
-          // 使用正则将文本拆分为"句子+可能的终止标点"，如果没有匹配到任何句子，按字符拆分
-          var sentenceMatches = RegExp(r'[^。！？；.!?]+[。！？；.!?]?\s*')
-              .allMatches(longParagraph)
-              .map((m) => m.group(0)!)
-              .toList();
-          
-          // 如果正则没有匹配到任何内容，按固定字符数拆分
-          if (sentenceMatches.isEmpty || sentenceMatches.join('').length < longParagraph.length * 0.8) {
-            const chunkSize = 100; // 每块100个字符
-            sentenceMatches.clear();
-            for (int i = 0; i < longParagraph.length; i += chunkSize) {
-              final end = (i + chunkSize < longParagraph.length) ? i + chunkSize : longParagraph.length;
-              sentenceMatches.add(longParagraph.substring(i, end));
-            }
-          }
-
-          for (final part in sentenceMatches) {
-            final test = currentPageContent.isEmpty ? part : '${currentPageContent.join('')}$part';
-            final p = TextPainter(
-              text: TextSpan(text: test, style: textStyle),
-              textDirection: TextDirection.ltr,
-              maxLines: null,
-            )..layout(maxWidth: availableWidth);
-
-            if (p.size.height > availableHeight && currentPageContent.isNotEmpty) {
-              final pageText = currentPageContent.join('').trim();
-              if (pageText.isNotEmpty) {
-                _pages.add(pageText);
-                debugPrint('添加长段落分页 ${_pages.length}: ${pageText.length} 字符');
-              }
-              currentPageContent.clear();
-            }
-            currentPageContent.add(part);
-          }
-        }
-      }
-
-      // 确保最后的内容也被添加
-      if (currentPageContent.isNotEmpty) {
-        final last = currentPageContent.join('\n\n').trim();
-        if (last.isNotEmpty) {
-          _pages.add(last);
-          debugPrint('添加最后页面 ${_pages.length}: ${last.length} 字符');
-        }
-      }
-
-      if (_pages.isEmpty) {
-        _pages = [cleanContent.isNotEmpty ? cleanContent : '内容加载完成但无法显示'];
-      }
-
-      // 验证内容完整性
-      final totalContentInPages = _pages.join('').replaceAll(RegExp(r'\s+'), '');
-      final originalContentClean = cleanContent.replaceAll(RegExp(r'\s+'), '');
-      final contentLossPercent = ((originalContentClean.length - totalContentInPages.length) / originalContentClean.length * 100);
-      
-      debugPrint('真实分页完成: 总共 ${_pages.length} 页');
-      debugPrint('原始内容长度: ${cleanContent.length} 字符');
-      debugPrint('分页后内容长度: ${_pages.join('').length} 字符');
-      debugPrint('内容丢失率: ${contentLossPercent.toStringAsFixed(2)}%');
-      debugPrint('平均每页: ${(cleanContent.length / _pages.length).toStringAsFixed(0)} 字符');
-
-      if (_currentPageIndex >= _pages.length) {
-        _currentPageIndex = _pages.isNotEmpty ? _pages.length - 1 : 0;
-      }
-
-      if (_pages.length != widget.book.totalPages) {
-        Future.microtask(() {
-          try {
-            _bookDao.updateBookTotalPages(widget.book.id!, _pages.length);
-          } catch (e) {
-            debugPrint('更新书籍页数失败: $e');
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('分页过程出错: $e');
-      _pages = ['$_kErrorPrefix 分页失败: $e'];
+  // 最后保险分页方法 - 使用固定字符数分页
+  void _ultimateFallbackPagination(String content) {
+    _pages.clear();
+    
+    const int fixedCharsPerPage = 800; // 降低字符数，增加页数
+    
+    debugPrint('🆘 执行最后保险分页，固定每页$fixedCharsPerPage字符');
+    
+    for (int i = 0; i < content.length; i += fixedCharsPerPage) {
+      final end = (i + fixedCharsPerPage < content.length) ? i + fixedCharsPerPage : content.length;
+      _pages.add(content.substring(i, end));
+    }
+    
+    debugPrint('🆘 最后保险分页完成: 总共 ${_pages.length} 页');
+    
+    // 最后的合理性检查
+    if (_pages.length > 10000) {
+      debugPrint('❌ 分页仍然异常，内容可能有问题');
+      _pages = ['$_kErrorPrefix 分页完全失败\n\n内容长度: ${content.length}\n页数: ${_pages.length}\n\n请检查文件格式'];
     }
   }
 
@@ -409,6 +347,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       _lineSpacing = prefs.getDouble('lineSpacing') ?? 1.8;
       _letterSpacing = prefs.getDouble('letterSpacing') ?? 0.2;
       _pageMargin = prefs.getDouble('pageMargin') ?? 16.0;
+      _horizontalPadding = prefs.getDouble('horizontalPadding') ?? 16.0;
       _autoScroll = prefs.getBool('autoScroll') ?? false;
       _keepScreenOn = prefs.getBool('keepScreenOn') ?? false;
       _fontFamily = prefs.getString('fontFamily') ?? 'System';
@@ -625,21 +564,28 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       );
     }
 
-    return Container(
-      color: _backgroundColor,
-      child: PageView.builder(
-        controller: _pageController,
-        itemCount: _pages.length,
-        itemBuilder: (context, index) => _buildPageWidget(index),
-        onPageChanged: (index) {
-          if (mounted) {
-            setState(() => _currentPageIndex = index);
-            _onPageTurn();
-          }
-        },
-        physics: const ClampingScrollPhysics(),
-      ),
-    );
+    // 检查是否应该显示双页布局
+    final shouldShowDoublePage = ResponsiveHelper.shouldShowDoublePage(context);
+    
+    if (shouldShowDoublePage) {
+      return _buildDoublePageView();
+    } else {
+      return Container(
+        color: _backgroundColor,
+        child: PageView.builder(
+          controller: _pageController,
+          itemCount: _pages.length,
+          itemBuilder: (context, index) => _buildPageWidget(index),
+          onPageChanged: (index) {
+            if (mounted) {
+              setState(() => _currentPageIndex = index);
+              _onPageTurn();
+            }
+          },
+          physics: const ClampingScrollPhysics(),
+        ),
+      );
+    }
   }
 
   void _handleHorizontalDragEnd(DragEndDetails details) {
@@ -664,6 +610,11 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildPageNumber() {
+    final shouldShowDoublePage = ResponsiveHelper.shouldShowDoublePage(context);
+    final displayText = shouldShowDoublePage && _currentPageIndex + 1 < _pages.length
+        ? '${_currentPageIndex + 1}-${_currentPageIndex + 2} / ${_pages.length}'
+        : '${_currentPageIndex + 1} / ${_pages.length}';
+    
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Center(
@@ -676,7 +627,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             border: Border.all(color: _fontColor.withValues(alpha: 0.15), width: 0.5),
           ),
           child: Text(
-            '${_currentPageIndex + 1} / ${_pages.length}',
+            displayText,
             style: TextStyle(
               color: _fontColor.withValues(alpha: 0.7),
               fontSize: 12,
@@ -691,10 +642,63 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildPageIndicators() {
-    return Container();
+    if (_showControls) return Container();
+    
+    return Positioned(
+      bottom: 30,
+      left: 0,
+      right: 0,
+      child: _buildPageNumber(),
+    );
   }
 
-  Widget _buildPageWidget(int index) {
+  // 双页布局视图 - 简化版，只有中间分隔线
+  Widget _buildDoublePageView() {
+    return Container(
+      color: _backgroundColor,
+      child: PageView.builder(
+        controller: _pageController,
+        itemCount: (_pages.length / 2).ceil(),
+        itemBuilder: (context, index) {
+          final leftPageIndex = index * 2;
+          final rightPageIndex = leftPageIndex + 1;
+          
+          return Row(
+            children: [
+              // 左页
+              Expanded(
+                child: leftPageIndex < _pages.length 
+                  ? _buildPageWidget(leftPageIndex, isDoublePage: true)
+                  : Container(color: _backgroundColor),
+              ),
+              // 中间分隔线
+              Container(
+                width: 1,
+                height: double.infinity,
+                color: _fontColor.withValues(alpha: 0.2),
+              ),
+              // 右页
+              Expanded(
+                child: rightPageIndex < _pages.length 
+                  ? _buildPageWidget(rightPageIndex, isDoublePage: true)
+                  : Container(color: _backgroundColor),
+              ),
+            ],
+          );
+        },
+        onPageChanged: (index) {
+          if (mounted) {
+            final newPageIndex = index * 2;
+            setState(() => _currentPageIndex = newPageIndex);
+            _onPageTurn();
+          }
+        },
+        physics: const ClampingScrollPhysics(),
+      ),
+    );
+  }
+
+  Widget _buildPageWidget(int index, {bool isDoublePage = false}) {
     if (index < 0 || index >= _pages.length) {
       return Container(
         color: _backgroundColor,
@@ -720,6 +724,13 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       );
     }
 
+    // 根据是否为双页布局调整边距和间距
+    final horizontalPadding = isDoublePage 
+        ? _horizontalPadding * 0.5  // 双页时减少内边距
+        : _horizontalPadding;
+    final topPadding = isDoublePage ? 10.0 : 20.0;
+    final bottomPadding = isDoublePage ? 60.0 : 80.0;
+    
     return Container(
       color: _backgroundColor,
       width: double.infinity,
@@ -727,13 +738,14 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: _pageMargin),
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
           child: Column(
             children: [
-              const SizedBox(height: 30),
+              SizedBox(height: topPadding),
               Expanded(
-                child: SingleChildScrollView(
-                  physics: const NeverScrollableScrollPhysics(),
+                child: Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.only(bottom: bottomPadding),
                   child: Text(
                     pageContent,
                     style: TextStyle(
@@ -747,14 +759,6 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                   ),
                 ),
               ),
-              if (!_showControls)
-                Container(
-                  height: 70,
-                  width: double.infinity,
-                  padding: const EdgeInsets.only(bottom: 20),
-                  child: _buildPageNumber(),
-                ),
-              const SizedBox(height: 10),
             ],
           ),
         ),
@@ -773,159 +777,124 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   Widget _buildTopBar() {
     final double statusBarHeight = MediaQuery.of(context).padding.top;
-    final double topBarHeight = statusBarHeight + 80; // 状态栏高度 + 工具栏高度
+    final double topBarHeight = statusBarHeight + 60;
+    
+    // 根据背景颜色动态调整工具栏颜色
+    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
+    final toolbarBgColor = isLightBackground 
+        ? Colors.white.withValues(alpha: 0.95)
+        : Colors.black.withValues(alpha: 0.9);
+    final textColor = isLightBackground ? Colors.black87 : Colors.white;
+    final iconBgColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.2)
+        : Colors.grey.withValues(alpha: 0.3);
+    final borderColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.2)
+        : Colors.grey.withValues(alpha: 0.3);
     
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 600),
-      curve: _showControls ? Curves.easeOutExpo : Curves.easeInExpo,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutExpo,
       top: _showControls ? 0 : -topBarHeight,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 500),
+        duration: const Duration(milliseconds: 300),
         opacity: _showControls ? 1.0 : 0.0,
-        curve: _showControls ? Curves.easeOut : Curves.easeIn,
         child: AnimatedScale(
-          duration: const Duration(milliseconds: 500),
-          scale: _showControls ? 1.0 : 0.94,
-          curve: _showControls ? Curves.elasticOut : Curves.easeInBack,
-          child: Transform.translate(
-            offset: Offset(0, _showControls ? 0 : -20),
-            child: IgnorePointer(
-              ignoring: !_showControls,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.7),
-                      Colors.black.withValues(alpha: 0.5),
-                      Colors.black.withValues(alpha: 0.2),
-                      Colors.transparent,
-                    ],
-                  ),
+          duration: const Duration(milliseconds: 400),
+          scale: _showControls ? 1.0 : 0.9,
+          curve: Curves.easeOutBack,
+          child: IgnorePointer(
+            ignoring: !_showControls,
+            child: Container(
+              padding: EdgeInsets.only(
+                top: statusBarHeight + 8,
+                left: 16,
+                right: 16,
+                bottom: 12,
+              ),
+              decoration: BoxDecoration(
+                color: toolbarBgColor,
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20),
                 ),
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(28),
-                    bottomRight: Radius.circular(28),
+                border: Border.all(color: borderColor, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
                   ),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                    child: Container(
-                      padding: EdgeInsets.only(
-                        top: MediaQuery.of(context).padding.top + 12,
-                        left: 16,
-                        right: 16,
-                        bottom: 20,
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(
+                        Icons.arrow_back_ios_rounded,
+                        color: textColor,
+                        size: 20,
                       ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(28),
-                          bottomRight: Radius.circular(28),
+                      padding: const EdgeInsets.all(8),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.book.title,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          width: 0.8,
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.book.author,
+                          style: TextStyle(
+                            color: textColor.withValues(alpha: 0.7),
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.blue.withValues(alpha: 0.4), 
+                        width: 1
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.25),
-                                width: 0.5,
-                              ),
-                            ),
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () => Navigator.pop(context),
-                                borderRadius: BorderRadius.circular(16),
-                                splashColor: Colors.white.withValues(alpha: 0.1),
-                                child: const Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: Icon(
-                                    Icons.arrow_back_ios_rounded,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  widget.book.title,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
-                                    shadows: [
-                                      Shadow(offset: Offset(0, 1), blurRadius: 2, color: Colors.black26),
-                                    ],
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  widget.book.author,
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.85),
-                                    fontSize: 13,
-                                    letterSpacing: 0.2,
-                                    shadows: const [
-                                      Shadow(offset: Offset(0, 1), blurRadius: 2, color: Colors.black26),
-                                    ],
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.white.withValues(alpha: 0.2),
-                                  Colors.white.withValues(alpha: 0.15),
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.6),
-                            ),
-                            child: Text(
-                              '${_currentPageIndex + 1}/${_pages.length}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.4,
-                                shadows: [
-                                  Shadow(offset: Offset(0, 1), blurRadius: 2, color: Colors.black26),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
+                    ),
+                    child: Text(
+                      '${_currentPageIndex + 1}/${_pages.length}',
+                      style: TextStyle(
+                        color: isLightBackground ? Colors.blue[700] : Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -936,104 +905,75 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   Widget _buildBottomToolbar() {
     final double bottomPadding = MediaQuery.of(context).padding.bottom;
-    final double bottomToolbarHeight = 150 + bottomPadding; // 工具栏高度 + 底部安全区域
+    final double bottomToolbarHeight = 140 + bottomPadding;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    // 根据背景颜色动态调整工具栏颜色
+    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
+    final toolbarBgColor = isLightBackground 
+        ? Colors.white.withValues(alpha: 0.95)
+        : Colors.black.withValues(alpha: 0.9);
+    final handleColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.4)
+        : Colors.grey.withValues(alpha: 0.5);
+    final borderColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.2)
+        : Colors.grey.withValues(alpha: 0.3);
     
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 700),
-      curve: _showControls ? Curves.easeOutExpo : Curves.easeInExpo,
-      bottom: _showControls ? 0 : -bottomToolbarHeight,
+      duration: const Duration(milliseconds: 600),
+      curve: _showControls ? Curves.easeOutBack : Curves.easeInBack,
+      // 从下方弹出动画：隐藏时在屏幕底部外，显示时滑动到顶部
+      bottom: _showControls ? screenHeight - bottomToolbarHeight - 100 : -bottomToolbarHeight,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 600),
+        duration: const Duration(milliseconds: 400),
         opacity: _showControls ? 1.0 : 0.0,
-        curve: _showControls ? Curves.easeOut : Curves.easeIn,
+        curve: Curves.easeInOut,
         child: AnimatedScale(
-          duration: const Duration(milliseconds: 600),
-          scale: _showControls ? 1.0 : 0.9,
-          curve: _showControls ? Curves.elasticOut : Curves.easeInBack,
+          duration: const Duration(milliseconds: 500),
+          scale: _showControls ? 1.0 : 0.8,
+          curve: Curves.elasticOut,
           child: Transform.translate(
-            offset: Offset(0, _showControls ? 0 : 30),
+            offset: Offset(0, _showControls ? 0 : 100),
             child: IgnorePointer(
               ignoring: !_showControls,
               child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.8),
-                      Colors.black.withValues(alpha: 0.6),
-                      Colors.black.withValues(alpha: 0.3),
-                      Colors.transparent,
-                    ],
-                  ),
+                padding: EdgeInsets.only(
+                  bottom: bottomPadding + 16,
+                  top: 20,
+                  left: 20,
+                  right: 20,
                 ),
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(36),
-                    topRight: Radius.circular(36),
-                  ),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-                    child: Container(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(context).padding.bottom + 20,
-                        top: 28,
-                        left: 28,
-                        right: 28,
-                      ),
+                decoration: BoxDecoration(
+                  color: toolbarBgColor,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: borderColor, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 20,
+                      offset: const Offset(0, -5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 4,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.5),
-                            Colors.black.withValues(alpha: 0.7),
-                            Colors.black.withValues(alpha: 0.9),
-                          ],
-                        ),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(36),
-                          topRight: Radius.circular(36),
-                        ),
-                        border: Border(
-                          top: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 1.2),
-                          left: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 0.6),
-                          right: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: 0.6),
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 60,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.white.withValues(alpha: 0.6),
-                                  Colors.white.withValues(alpha: 0.4),
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(3),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 28),
-                          _buildProgressSlider(),
-                          const SizedBox(height: 28),
-                          _buildToolbarButtons(),
-                        ],
+                        color: handleColor,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    _buildProgressSlider(),
+                    const SizedBox(height: 16),
+                    _buildToolbarButtons(),
+                  ],
                 ),
               ),
             ),
@@ -1044,64 +984,108 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildToolbarButtons() {
+    // 根据背景颜色动态调整按钮样式
+    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
+    final buttonBgColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.1)
+        : Colors.grey.withValues(alpha: 0.2);
+    final borderColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.2)
+        : Colors.grey.withValues(alpha: 0.3);
+    
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 0.8),
+        color: buttonBgColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _ModernToolbarButton(
+          _SimpleToolbarButton(
             icon: Icons.format_list_bulleted_rounded,
             label: '目录',
             onTap: _showTableOfContents,
+            isLightBackground: isLightBackground,
           ),
-          Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.15)),
-          _ModernToolbarButton(
+          _buildDivider(),
+          _SimpleToolbarButton(
             icon: Icons.tune_rounded,
             label: '设置',
             onTap: _showSettingsPanel,
-            isActive: false,
+            isLightBackground: isLightBackground,
           ),
-          Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.15)),
-          _ModernToolbarButton(
+          _buildDivider(),
+          _SimpleToolbarButton(
             icon: Icons.bookmark_add_rounded,
             label: '书签',
             onTap: _showBookmarks,
+            isLightBackground: isLightBackground,
           ),
-          Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.15)),
-          _ModernToolbarButton(
-            icon: _autoScroll ? Icons.pause_circle_rounded : Icons.play_circle_rounded,
-            label: _autoScroll ? '暂停' : '播放',
-            onTap: _toggleAutoScroll,
-            isActive: _autoScroll,
-          ),
-          Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.15)),
-          _ModernToolbarButton(
+          _buildDivider(),
+          _SimpleToolbarButton(
             icon: Icons.more_horiz_rounded,
             label: '更多',
             onTap: _showMoreOptions,
+            isLightBackground: isLightBackground,
           ),
         ],
       ),
     );
   }
 
+  Widget _buildDivider() {
+    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
+    final dividerColor = isLightBackground 
+        ? Colors.grey.withValues(alpha: 0.3)
+        : Colors.white.withValues(alpha: 0.3);
+    return Container(
+      width: 1, 
+      height: 20, 
+      color: dividerColor,
+    );
+  }
+
   Widget _buildProgressSlider() {
     final progress = _pages.isNotEmpty ? (_currentPageIndex + 1) / _pages.length : 0.0;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    // 主题颜色
+    final containerBgColor = isDarkMode 
+        ? Colors.grey[850]!.withValues(alpha: 0.8)
+        : Colors.grey[100]!.withValues(alpha: 0.9);
+    final containerBorderColor = isDarkMode 
+        ? Colors.grey[700]!.withValues(alpha: 0.6)
+        : Colors.grey[300]!.withValues(alpha: 0.8);
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final progressBadgeColor = isDarkMode 
+        ? Colors.blue[600]!.withValues(alpha: 0.8)
+        : Colors.blue[500]!.withValues(alpha: 0.9);
+    
+    // 滑块颜色
+    final activeTrackColor = isDarkMode ? Colors.blue[400]! : Colors.blue[500]!;
+    final inactiveTrackColor = isDarkMode 
+        ? Colors.grey[600]!.withValues(alpha: 0.5)
+        : Colors.grey[300]!.withValues(alpha: 0.8);
+    final thumbColor = isDarkMode ? Colors.blue[300]! : Colors.blue[600]!;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 0.5),
+        color: containerBgColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: containerBorderColor, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           children: [
             Row(
@@ -1109,18 +1093,25 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
               children: [
                 Text(
                   _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: textColor,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.3,
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(10),
+                    color: progressBadgeColor,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: progressBadgeColor.withValues(alpha: 0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Text(
                     '${(progress * 100).toStringAsFixed(1)}%',
@@ -1128,35 +1119,39 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                trackHeight: 6,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-                activeTrackColor: Colors.white,
-                inactiveTrackColor: Colors.white.withValues(alpha: 0.25),
-                thumbColor: Colors.white,
-                overlayColor: Colors.white.withValues(alpha: 0.15),
+                trackHeight: 8, // 增加轨道高度
+                thumbShape: CustomSliderThumbShape(
+                  enabledThumbRadius: 14,
+                  thumbColor: thumbColor,
+                ),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
+                activeTrackColor: activeTrackColor,
+                inactiveTrackColor: inactiveTrackColor,
+                overlayColor: activeTrackColor.withValues(alpha: 0.2),
                 valueIndicatorShape: const PaddleSliderValueIndicatorShape(),
-                valueIndicatorColor: Colors.white,
+                valueIndicatorColor: thumbColor,
                 valueIndicatorTextStyle: const TextStyle(
-                  color: Colors.black87,
+                  color: Colors.white,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
+                trackShape: CustomSliderTrackShape(),
               ),
               child: Slider(
                 value: _pages.isNotEmpty ? _currentPageIndex.toDouble().clamp(0, (_pages.length - 1).toDouble()) : 0.0,
                 min: 0,
                 max: (_pages.isNotEmpty ? _pages.length - 1 : 0).toDouble(),
                 divisions: _pages.isNotEmpty ? _pages.length - 1 : null,
-                label: _pages.isNotEmpty ? '${_currentPageIndex + 1}' : '0',
+                label: _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
                 onChanged: _pages.isNotEmpty ? (value) => setState(() => _currentPageIndex = value.toInt()) : null,
                 onChangeEnd: _pages.isNotEmpty
                     ? (value) {
@@ -1169,14 +1164,14 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                     : null,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   '总进度',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.7),
+                    color: textColor.withValues(alpha: 0.7),
                     fontSize: 11,
                     letterSpacing: 0.2,
                   ),
@@ -1184,7 +1179,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                 Text(
                   _pages.isNotEmpty ? '共 ${_pages.length} 页' : '共 0 页',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
+                    color: textColor.withValues(alpha: 0.9),
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1202,54 +1197,124 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.5),
+      barrierColor: Colors.black.withValues(alpha: 0.6),
       isScrollControlled: true,
+      enableDrag: true,
+      isDismissible: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return SizedBox(
-              height: MediaQuery.of(context).size.height * 0.8,
+            final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+            final panelBgColor = isDarkMode 
+                ? Colors.grey[900]!.withValues(alpha: 0.98)
+                : Colors.grey[50]!.withValues(alpha: 0.98);
+            final panelBorderColor = isDarkMode 
+                ? Colors.grey[700]!.withValues(alpha: 0.6)
+                : Colors.grey[300]!.withValues(alpha: 0.8);
+            
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              height: MediaQuery.of(context).size.height * 0.85,
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.85),
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 1),
+                      color: panelBgColor,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                      border: Border.all(color: panelBorderColor, width: 1),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: isDarkMode ? 0.4 : 0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, -5),
+                        ),
+                      ],
                     ),
                     child: Column(
                       children: [
+                        // 拖拽指示器
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: Container(
+                              width: 40,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: isDarkMode 
+                                    ? Colors.grey[600] 
+                                    : Colors.grey[400],
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
                         // 标题栏
                         Container(
-                          padding: const EdgeInsets.all(24),
+                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                           decoration: BoxDecoration(
                             border: Border(
-                              bottom: BorderSide(color: Colors.white.withValues(alpha: 0.1), width: 1),
+                              bottom: BorderSide(
+                                color: isDarkMode 
+                                    ? Colors.grey[700]!.withValues(alpha: 0.5)
+                                    : Colors.grey[300]!.withValues(alpha: 0.8), 
+                                width: 1
+                              ),
                             ),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.tune_rounded, color: Colors.white, size: 24),
-                              const SizedBox(width: 12),
-                              const Text(
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: isDarkMode 
+                                      ? Colors.blue[600]!.withValues(alpha: 0.2)
+                                      : Colors.blue[100]!.withValues(alpha: 0.8),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Icons.tune_rounded, 
+                                  color: isDarkMode ? Colors.blue[300] : Colors.blue[600], 
+                                  size: 24
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
                                 '阅读设置',
-                                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                                style: TextStyle(
+                                  color: isDarkMode ? Colors.white : Colors.grey[800], 
+                                  fontSize: 22, 
+                                  fontWeight: FontWeight.w700, 
+                                  letterSpacing: 0.5
+                                ),
                               ),
                               const Spacer(),
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
+                                  color: isDarkMode 
+                                      ? Colors.grey[700]!.withValues(alpha: 0.5)
+                                      : Colors.grey[200]!.withValues(alpha: 0.8),
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: IconButton(
-                                  icon: Icon(Icons.refresh_rounded, color: Colors.white.withValues(alpha: 0.7), size: 20),
+                                  icon: Icon(
+                                    Icons.refresh_rounded, 
+                                    color: isDarkMode 
+                                        ? Colors.grey[300] 
+                                        : Colors.grey[600], 
+                                    size: 20
+                                  ),
                                   onPressed: () {
                                     _resetSettings();
                                     setModalState(() {});
                                     setState(() {});
                                   },
+                                  tooltip: '重置设置',
                                 ),
                               ),
                             ],
@@ -1258,47 +1323,54 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                         // 设置内容
                         Expanded(
                           child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(20),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 _buildSettingSection(
                                   title: '文字设置',
                                   icon: Icons.text_fields_rounded,
+                                  isDarkMode: isDarkMode,
                                   children: [
-                                    _buildSettingSlider(
+                                    _buildEnhancedSettingSlider(
                                       label: '字号',
                                       value: _fontSize,
                                       min: 12,
                                       max: 30,
                                       divisions: 18,
                                       unit: 'pt',
+                                      icon: Icons.format_size,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _fontSize = v);
                                         setState(() {});
                                         _saveSetting((p) => p.setDouble('fontSize', v));
                                       },
                                     ),
-                                    _buildSettingSlider(
+                                    _buildEnhancedSettingSlider(
                                       label: '行距',
                                       value: _lineSpacing,
                                       min: 1.0,
                                       max: 3.0,
                                       divisions: 20,
                                       unit: 'x',
+                                      icon: Icons.format_line_spacing,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _lineSpacing = v);
                                         setState(() {});
                                         _saveSetting((p) => p.setDouble('lineSpacing', v));
                                       },
                                     ),
-                                    _buildSettingSlider(
+                                    _buildEnhancedSettingSlider(
                                       label: '字间距',
                                       value: _letterSpacing,
                                       min: 0.0,
                                       max: 2.0,
                                       divisions: 20,
                                       unit: 'pt',
+                                      icon: Icons.text_fields,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _letterSpacing = v);
                                         setState(() {});
@@ -1311,18 +1383,36 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                                 _buildSettingSection(
                                   title: '页面设置',
                                   icon: Icons.article_rounded,
+                                  isDarkMode: isDarkMode,
                                   children: [
-                                    _buildSettingSlider(
+                                    _buildEnhancedSettingSlider(
                                       label: '页面边距',
                                       value: _pageMargin,
                                       min: 8,
                                       max: 32,
                                       divisions: 12,
                                       unit: 'px',
+                                      icon: Icons.crop_free,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _pageMargin = v);
                                         setState(() {});
                                         _saveSetting((p) => p.setDouble('pageMargin', v));
+                                      },
+                                    ),
+                                    _buildEnhancedSettingSlider(
+                                      label: '左右留白',
+                                      value: _horizontalPadding,
+                                      min: 8,
+                                      max: 48,
+                                      divisions: 20,
+                                      unit: 'px',
+                                      icon: Icons.horizontal_distribute,
+                                      isDarkMode: isDarkMode,
+                                      onChanged: (v) {
+                                        setModalState(() => _horizontalPadding = v);
+                                        setState(() {});
+                                        _saveSetting((p) => p.setDouble('horizontalPadding', v));
                                       },
                                     ),
                                   ],
@@ -1331,18 +1421,22 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                                 _buildSettingSection(
                                   title: '主题设置',
                                   icon: Icons.palette_rounded,
+                                  isDarkMode: isDarkMode,
                                   children: [
-                                    _buildColorThemeSelector(setModalState),
+                                    _buildEnhancedColorThemeSelector(setModalState, isDarkMode),
                                   ],
                                 ),
                                 const SizedBox(height: 24),
                                 _buildSettingSection(
                                   title: '阅读体验',
                                   icon: Icons.auto_stories_rounded,
+                                  isDarkMode: isDarkMode,
                                   children: [
                                     _buildSwitchSetting(
                                       label: '保持屏幕常亮',
                                       value: _keepScreenOn,
+                                      icon: Icons.screen_lock_portrait,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _keepScreenOn = v);
                                         setState(() {});
@@ -1352,6 +1446,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                                     _buildSwitchSetting(
                                       label: '自动滚动',
                                       value: _autoScroll,
+                                      icon: Icons.auto_mode,
+                                      isDarkMode: isDarkMode,
                                       onChanged: (v) {
                                         setModalState(() => _autoScroll = v);
                                         setState(() {});
@@ -1374,25 +1470,44 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                           ),
                           decoration: BoxDecoration(
                             border: Border(
-                              top: BorderSide(color: Colors.white.withValues(alpha: 0.1), width: 1),
+                              top: BorderSide(
+                                color: isDarkMode 
+                                    ? Colors.grey[700]!.withValues(alpha: 0.5)
+                                    : Colors.grey[300]!.withValues(alpha: 0.8), 
+                                width: 1
+                              ),
                             ),
                           ),
                           child: Row(
                             children: [
                               Expanded(
-                                child: TextButton(
+                                child: ElevatedButton(
                                   onPressed: () => Navigator.pop(context),
-                                  style: TextButton.styleFrom(
-                                    backgroundColor: Colors.white.withValues(alpha: 0.1),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isDarkMode 
+                                        ? Colors.blue[600]
+                                        : Colors.blue[500],
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 16),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(16),
                                     ),
+                                    elevation: 0,
+                                    shadowColor: Colors.transparent,
                                   ),
-                                  child: const Text(
-                                    '完成',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.check, size: 20),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        '完成设置',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -1422,13 +1537,33 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     required String title,
     required IconData icon,
     required List<Widget> children,
+    bool isDarkMode = true,
   }) {
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final sectionBgColor = isDarkMode 
+        ? Colors.grey[850]!.withValues(alpha: 0.6)
+        : Colors.grey[50]!.withValues(alpha: 0.9);
+    final sectionBorderColor = isDarkMode 
+        ? Colors.grey[700]!.withValues(alpha: 0.5)
+        : Colors.grey[300]!.withValues(alpha: 0.8);
+    final iconBgColor = isDarkMode 
+        ? Colors.blue[600]!.withValues(alpha: 0.3)
+        : Colors.blue[100]!.withValues(alpha: 0.8);
+    final iconColor = isDarkMode ? Colors.blue[300] : Colors.blue[600];
+    
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
+        color: sectionBgColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: sectionBorderColor, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1436,76 +1571,146 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, color: Colors.white.withValues(alpha: 0.8), size: 20),
+                child: Icon(icon, color: iconColor, size: 22),
               ),
-              const SizedBox(width: 12),
-              const SizedBox.shrink(),
+              const SizedBox(width: 16),
               Text(
                 title,
-                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           ...children,
         ],
       ),
     );
   }
 
-  Widget _buildSettingSlider({
+  Widget _buildEnhancedSettingSlider({
     required String label,
     required double value,
     required double min,
     required double max,
     int? divisions,
     String unit = '',
+    required IconData icon,
+    required bool isDarkMode,
     required ValueChanged<double> onChanged,
   }) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-              child: Text(
-                '${value.toStringAsFixed(1)}$unit',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final activeColor = isDarkMode ? Colors.blue[400]! : Colors.blue[500]!;
+    final inactiveColor = isDarkMode 
+        ? Colors.grey[600]!.withValues(alpha: 0.5)
+        : Colors.grey[300]!.withValues(alpha: 0.8);
+    final badgeColor = isDarkMode 
+        ? Colors.blue[600]!.withValues(alpha: 0.3)
+        : Colors.blue[100]!.withValues(alpha: 0.8);
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDarkMode 
+            ? Colors.grey[800]!.withValues(alpha: 0.4)
+            : Colors.white.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDarkMode 
+              ? Colors.grey[700]!.withValues(alpha: 0.5)
+              : Colors.grey[300]!.withValues(alpha: 0.6),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  color: isDarkMode ? Colors.blue[300] : Colors.blue[600],
+                  size: 18,
+                ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: activeColor.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: activeColor.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '${value.toStringAsFixed(1)}$unit',
+                  style: TextStyle(
+                    color: activeColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 6,
+              thumbShape: CustomSliderThumbShape(
+                enabledThumbRadius: 12,
+                thumbColor: activeColor,
+              ),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+              activeTrackColor: activeColor,
+              inactiveTrackColor: inactiveColor,
+              overlayColor: activeColor.withValues(alpha: 0.1),
+              trackShape: CustomSliderTrackShape(),
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            trackHeight: 4,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-            activeTrackColor: Colors.white,
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
-            thumbColor: Colors.white,
-            overlayColor: Colors.white.withValues(alpha: 0.1),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions,
+              onChanged: onChanged,
+            ),
           ),
-          child: Slider(
-            value: value.clamp(min, max),
-            min: min,
-            max: max,
-            divisions: divisions,
-            onChanged: onChanged,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1513,53 +1718,125 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     required String label,
     required bool value,
     required ValueChanged<bool> onChanged,
+    IconData? icon,
+    bool isDarkMode = true,
   }) {
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final activeColor = isDarkMode ? Colors.blue[400]! : Colors.blue[500]!;
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.5),
+        color: isDarkMode 
+            ? Colors.grey[800]!.withValues(alpha: 0.4)
+            : Colors.white.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDarkMode 
+              ? Colors.grey[700]!.withValues(alpha: 0.5)
+              : Colors.grey[300]!.withValues(alpha: 0.6),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+          if (icon != null) ...[
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: activeColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                color: activeColor,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           Switch(
             value: value,
             onChanged: onChanged,
             activeColor: Colors.white,
-            activeTrackColor: Colors.white.withValues(alpha: 0.3),
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
-            inactiveThumbColor: Colors.white.withValues(alpha: 0.5),
+            activeTrackColor: activeColor,
+            inactiveTrackColor: isDarkMode 
+                ? Colors.grey[600]!.withValues(alpha: 0.5)
+                : Colors.grey[300]!.withValues(alpha: 0.8),
+            inactiveThumbColor: isDarkMode 
+                ? Colors.grey[400]
+                : Colors.grey[600],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildColorThemeSelector(StateSetter setModalState) {
+  Widget _buildEnhancedColorThemeSelector(StateSetter setModalState, bool isDarkMode) {
     final themes = [
-      {'name': '护眼绿', 'bg': const Color(0xFFCCE8CC), 'text': const Color(0xFF2D5016)},
-      {'name': '羊皮纸', 'bg': const Color(0xFFFBF5E6), 'text': const Color(0xFF5C4A37)},
-      {'name': '夜间黑', 'bg': const Color(0xFF1E1E1E), 'text': const Color(0xFFE0E0E0)},
-      {'name': '纯净白', 'bg': Colors.white, 'text': Colors.black87},
+      {'name': '护眼绿', 'bg': const Color(0xFFCCE8CC), 'text': const Color(0xFF2D5016), 'icon': Icons.eco},
+      {'name': '羊皮纸', 'bg': const Color(0xFFFBF5E6), 'text': const Color(0xFF5C4A37), 'icon': Icons.article},
+      {'name': '夜间黑', 'bg': const Color(0xFF1E1E1E), 'text': const Color(0xFFE0E0E0), 'icon': Icons.dark_mode},
+      {'name': '纯净白', 'bg': Colors.white, 'text': Colors.black87, 'icon': Icons.light_mode},
     ];
 
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final selectedBorderColor = isDarkMode ? Colors.blue[400]! : Colors.blue[500]!;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('主题色彩', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: themes.map((theme) {
+        Row(
+          children: [
+            Icon(
+              Icons.palette_rounded,
+              color: isDarkMode ? Colors.blue[300] : Colors.blue[600],
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '主题色彩',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 2.2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+          ),
+          itemCount: themes.length,
+          itemBuilder: (context, index) {
+            final theme = themes[index];
             final isSelected = _backgroundColor == theme['bg'] as Color && _fontColor == theme['text'] as Color;
+            
             return GestureDetector(
               onTap: () {
                 setModalState(() {
@@ -1572,31 +1849,89 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                   p.setInt('fontColor', (_fontColor).toARGB32());
                 });
               },
-              child: Container(
-                width: 80,
-                height: 60,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 decoration: BoxDecoration(
                   color: theme['bg'] as Color,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.3),
+                    color: isSelected 
+                        ? selectedBorderColor
+                        : (isDarkMode 
+                            ? Colors.grey[600]!.withValues(alpha: 0.5)
+                            : Colors.grey[300]!.withValues(alpha: 0.8)),
                     width: isSelected ? 3 : 1,
                   ),
                   boxShadow: isSelected
-                      ? [BoxShadow(color: Colors.white.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
-                      : null,
+                      ? [
+                          BoxShadow(
+                            color: selectedBorderColor.withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            spreadRadius: 2,
+                          )
+                        ]
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          )
+                        ],
                 ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('Aa', style: TextStyle(color: theme['text'] as Color, fontSize: 16, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(theme['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 10)),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: (theme['text'] as Color).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          theme['icon'] as IconData,
+                          color: theme['text'] as Color,
+                          size: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Aa',
+                              style: TextStyle(
+                                color: theme['text'] as Color,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              theme['name'] as String,
+                              style: TextStyle(
+                                color: (theme['text'] as Color).withValues(alpha: 0.7),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSelected)
+                        Icon(
+                          Icons.check_circle,
+                          color: selectedBorderColor,
+                          size: 20,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             );
-          }).toList(),
+          },
         ),
       ],
     );
@@ -1825,6 +2160,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     _lineSpacing = 1.8;
     _letterSpacing = 0.2;
     _pageMargin = 16.0;
+    _horizontalPadding = 16.0;
     _autoScroll = false;
     _keepScreenOn = false;
     _fontFamily = 'System';
@@ -1835,6 +2171,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       await p.remove('lineSpacing');
       await p.remove('letterSpacing');
       await p.remove('pageMargin');
+      await p.remove('horizontalPadding');
       await p.remove('autoScroll');
       await p.remove('keepScreenOn');
       await p.remove('fontFamily');
@@ -1957,41 +2294,43 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 }
 
-// 现代化工具栏按钮
-class _ModernToolbarButton extends StatelessWidget {
+// 简单工具栏按钮
+class _SimpleToolbarButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool isActive;
+  final bool isLightBackground;
 
-  const _ModernToolbarButton({
+  const _SimpleToolbarButton({
     required this.icon,
     required this.label,
     required this.onTap,
-    this.isActive = false,
+    this.isLightBackground = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final iconColor = isLightBackground ? Colors.black87 : Colors.white;
+    
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isActive ? Colors.white.withValues(alpha: 0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 22),
+            Icon(
+              icon, 
+              color: iconColor, 
+              size: 18
+            ),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                color: iconColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],

@@ -113,7 +113,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         child: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 80, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
             children: [
               _buildSectionCard(
                 title: '外观设置',

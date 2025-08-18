@@ -20,11 +20,6 @@ version: 1.0.0+1
 
 environment:
   sdk: ^3.8.1
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: true
-  image_path: "lib/assets/images/icon.png"
-  adaptive_icon_background: "#FFFFFF"
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -67,6 +62,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  
+  # Flutter应用图标生成工具
+  flutter_launcher_icons: ^0.11.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -109,3 +107,13 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Flutter应用图标配置 (已手动设置完成)
+# flutter_launcher_icons:
+#   android: "launcher_icon"
+#   ios: true
+#   image_path: "assets/images/app_icon.png"
+#   min_sdk_android: 21
+#   adaptive_icon_background: "#FFFFFF"
+#   adaptive_icon_foreground: "assets/images/app_icon.png"
+

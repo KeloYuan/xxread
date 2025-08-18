@@ -26,6 +26,7 @@ xxread (小元读书) is an elegant Flutter e-book reader application that suppo
 - `flutter build web` - Build for web
 
 ### Testing
+- `flutter test` - Run all tests
 - `flutter test test/widget_test.dart` - Run specific test file
 - `flutter test --coverage` - Run tests with coverage report
 
@@ -116,6 +117,11 @@ Navigation adapts based on screen size:
 - `intl` - Internationalization support
 
 ## Development Notes
+
+### Main Entry Point
+- Desktop platform initialization occurs in `main.dart` with `sqfliteFfiInit()` for Windows/Linux/macOS
+- `ThemeNotifier` provider manages app-wide theme state
+- Debug logging utility available as `debugLog()` function
 
 ### Cross-Platform Considerations
 - Database initialization differs between mobile and desktop platforms
