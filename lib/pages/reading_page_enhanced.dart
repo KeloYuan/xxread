@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:ui';
 
 import 'package:epubx/epubx.dart';
@@ -32,6 +31,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   List<String> _pages = [];
   String _bookContent = '';
   int _currentPageIndex = 0;
+  Size? _lastScreenSize; // 用于检测屏幕尺寸变化
 
   // --- UI State ---
   bool _showControls = false; // 默认隐藏工具栏
@@ -124,8 +124,15 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     try {
       if (fileExtension == 'epub') {
         debugPrint('开始解析 EPUB: ${widget.book.filePath}');
-        _bookContent = await _parseEpubInIsolate(widget.book.filePath);
+        _bookContent = await _parseEpubDirectly(widget.book.filePath);
         debugPrint('EPUB 解析完成，长度: ${_bookContent.length}');
+        
+        // 验证内容是否足够丰富
+        if (_bookContent.length < 1000) {
+          debugPrint('⚠️ 警告: EPUB 内容过少 (${_bookContent.length} 字符)，可能解析不完整');
+        } else {
+          debugPrint('✅ EPUB 内容验证通过，共 ${_bookContent.length} 字符');
+        }
       } else if (fileExtension == 'txt') {
         debugPrint('开始读取 TXT: ${widget.book.filePath}');
         try {
@@ -155,81 +162,132 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       if (_bookContent.length < 10) {
         throw Exception('文件内容过短，可能不是有效的书籍文件');
       }
+      
+      // 打印内容统计信息
+      final lines = _bookContent.split('\n').length;
+      final words = _bookContent.split(RegExp(r'\s+')).length;
+      debugPrint('📈 文本统计: $lines 行, $words 个词, ${_bookContent.length} 字符');
     } catch (e) {
       debugPrint('文件读取异常: $e');
       rethrow;
     }
   }
 
-  // 在 isolate 中解析 EPUB
-  static Future<String> _parseEpubInIsolate(String filePath) async {
-    final receivePort = ReceivePort();
-    await Isolate.spawn(_epubParsingIsolate, {
-      'sendPort': receivePort.sendPort,
-      'filePath': filePath,
-    });
-
-    final result = await receivePort.first;
-    if (result is String) return result;
-    throw Exception(result.toString());
-  }
-
-  static void _epubParsingIsolate(Map<String, dynamic> params) async {
-    final sendPort = params['sendPort'] as SendPort;
-    final filePath = params['filePath'] as String;
-
+  // 直接解析 EPUB，避免 isolate 通信限制
+  Future<String> _parseEpubDirectly(String filePath) async {
     try {
       final file = File(filePath);
       if (!await file.exists()) {
-        sendPort.send('EPUB 文件不存在: $filePath');
-        return;
+        throw Exception('EPUB 文件不存在: $filePath');
       }
 
+      debugPrint('📂 开始读取 EPUB 文件...');
       final bytes = await file.readAsBytes();
+      debugPrint('📂 EPUB 文件大小: ${bytes.length} 字节');
+      
       if (bytes.isEmpty) {
-        sendPort.send('EPUB 文件为空: $filePath');
-        return;
+        throw Exception('EPUB 文件为空: $filePath');
       }
 
+      debugPrint('📂 开始解析 EPUB 结构...');
       final epubBook = await EpubReader.readBook(bytes);
+      
+      // 检查基本信息
+      debugPrint('📚 书籍标题: ${epubBook.Title}');
+      debugPrint('📚 作者: ${epubBook.Author}');
+      debugPrint('📚 章节数量: ${epubBook.Chapters?.length ?? 0}');
+      
       if (epubBook.Chapters == null || epubBook.Chapters!.isEmpty) {
-        sendPort.send('EPUB 文件无有效章节: $filePath');
-        return;
+        throw Exception('EPUB 文件无有效章节: $filePath');
       }
 
       final buffer = StringBuffer();
       final chapters = epubBook.Chapters!;
-      for (final chapter in chapters) {
-        final htmlContent = chapter.HtmlContent;
-        if (htmlContent != null && htmlContent.isNotEmpty) {
-          final cleanText = _stripHtmlTagsStatic(htmlContent);
-          if (cleanText.trim().isNotEmpty) {
-            if (buffer.isNotEmpty) buffer.writeln('\n${'─' * 20}\n');
-            buffer.writeln(cleanText.trim());
+      int processedChapters = 0;
+      
+      // 全面章节处理函数
+      void processChapter(dynamic chapter, int depth) {
+        try {
+          final htmlContent = chapter.HtmlContent;
+          if (htmlContent != null && htmlContent.isNotEmpty) {
+            final cleanText = _stripHtmlTags(htmlContent);
+            if (cleanText.trim().isNotEmpty) {
+              if (buffer.isNotEmpty) {
+                buffer.writeln('\n${'─' * 30}\n');
+              }
+              buffer.writeln(cleanText.trim());
+              processedChapters++;
+              debugPrint('📝 处理章节 $processedChapters, 深度: $depth, 内容长度: ${cleanText.length}');
+            }
           }
+          
+          // 递归处理子章节
+          if (chapter.SubChapters != null && chapter.SubChapters!.isNotEmpty) {
+            debugPrint('📁 章节 "${chapter.Title ?? 'Unknown'}" 包含 ${chapter.SubChapters!.length} 个子章节');
+            for (final subChapter in chapter.SubChapters!) {
+              processChapter(subChapter, depth + 1);
+            }
+          }
+          
+          // 检查是否有其他可能的内容源
+          if (chapter.Anchor != null && chapter.Anchor!.isNotEmpty) {
+            debugPrint('🔗 章节附加信息: ${chapter.Anchor}');
+          }
+        } catch (e) {
+          debugPrint('⚠️ 处理章节错误: $e');
         }
       }
-
-      if (buffer.isEmpty) {
-        sendPort.send('EPUB 解析后内容为空: $filePath');
-      } else {
-        sendPort.send(buffer.toString().trim());
+      
+      // 处理所有主章节
+      for (int i = 0; i < chapters.length; i++) {
+        final chapter = chapters[i];
+        final title = chapter.Title ?? '无标题';
+        debugPrint('📄 开始处理第 ${i + 1}/${chapters.length} 章: "$title"');
+        processChapter(chapter, 0);
       }
+      
+
+      final finalContent = buffer.toString().trim();
+      debugPrint('✅ EPUB 解析完成!');
+      debugPrint('📈 总章节数: $processedChapters');
+      debugPrint('📈 最终内容长度: ${finalContent.length} 字符');
+      debugPrint('📈 内容预览: ${finalContent.length > 200 ? '${finalContent.substring(0, 200)}...' : finalContent}');
+      
+      if (finalContent.isEmpty) {
+        throw Exception('EPUB 解析后内容为空: $filePath');
+      }
+      
+      return finalContent;
     } catch (e) {
-      sendPort.send('EPUB 解析失败: $e');
+      debugPrint('❌ EPUB 解析失败: $e');
+      throw Exception('EPUB 解析失败: $e');
     }
   }
 
-  static String _stripHtmlTagsStatic(String htmlString) {
-    return htmlString
+  String _stripHtmlTags(String htmlString) {
+    // 增强HTML清理逻辑
+    String text = htmlString
+        // 先处理段落和换行
+        .replaceAll(RegExp(r'<\s*\/?\s*(p|div|br|h[1-6])\s*[^>]*>', caseSensitive: false), '\n')
+        // 移除其他HTML标签
         .replaceAll(RegExp(r'<[^>]*>'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
+        // 处理HTML实体
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&')
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&hellip;', '...')
+        .replaceAll('&mdash;', '—')
+        .replaceAll('&ndash;', '–')
+        .replaceAll(RegExp(r'&[a-zA-Z0-9#]+;'), '') // 移除其他实体
+        // 清理多余空格和换行
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'\n\s*\n'), '\n\n') // 保留段落间距
         .trim();
+    
+    return text;
   }
 
   void _splitIntoPages() {
@@ -262,82 +320,165 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     }
   }
 
-  // 标准化分页算法 - 统一不同设备的分页结果
+  // 响应式分页算法 - 根据屏幕和设置动态计算
   void _standardizedPagination(String content) {
-    debugPrint('📱 开始标准化分页...');
+    debugPrint('📱 开始响应式分页...');
     
-    // 获取设备信息
-    final screenSize = MediaQuery.of(context).size;
-    final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
-    
-    debugPrint('📱 设备信息: 屏幕${screenSize.width}x${screenSize.height}, DPR$devicePixelRatio');
-    
-    // 标准化字符数计算 - 基于逻辑像素而非物理像素
-    final logicalWidth = screenSize.width;
-    final logicalHeight = screenSize.height;
-    
-    // 基于逻辑尺寸计算每页字符数
-    int charsPerPage;
-    if (logicalWidth > 600) {
-      // 平板或横屏
-      charsPerPage = 800;
-    } else if (logicalHeight > 700) {
-      // 长屏手机
-      charsPerPage = 600;
-    } else {
-      // 标准手机
-      charsPerPage = 500;
-    }
-    
-    // 根据字体大小调整
-    final fontScale = _fontSize / 18.0; // 18为基准字体大小
-    charsPerPage = (charsPerPage / fontScale).round();
-    
-    // 确保在合理范围内
-    charsPerPage = charsPerPage.clamp(400, 1000);
-    
-    debugPrint('📊 标准化分页: 每页$charsPerPage字符 (逻辑尺寸${logicalWidth}x$logicalHeight)');
-    
-    // 执行分页
-    for (int i = 0; i < content.length; i += charsPerPage) {
-      final end = (i + charsPerPage < content.length) ? i + charsPerPage : content.length;
-      _pages.add(content.substring(i, end));
-    }
-    
-    debugPrint('✅ 标准化分页完成: 总共 ${_pages.length} 页');
-    
-    // 验证分页结果
-    final avgCharsPerPage = content.length / _pages.length;
-    debugPrint('📈 平均每页: ${avgCharsPerPage.toStringAsFixed(0)} 字符');
-    
-    if (_pages.length < 10 && content.length > 5000) {
-      debugPrint('⚠️ 页数可能过少，使用保险分页');
-      _ultimateFallbackPagination(content);
+    try {
+      if (content.isEmpty) {
+        _pages = ['内容为空'];
+        return;
+      }
+      
+      // 获取屏幕尺寸和可用区域
+      final screenSize = MediaQuery.of(context).size;
+      final padding = MediaQuery.of(context).padding;
+      
+      // 计算实际可用的文本区域，防止溢出
+      final availableWidth = (screenSize.width - (_horizontalPadding * 2)).clamp(200.0, double.infinity);
+      final availableHeight = (screenSize.height - padding.top - padding.bottom - 200).clamp(300.0, double.infinity);
+      
+      debugPrint('📏 可用文本区域: ${availableWidth.toInt()}x${availableHeight.toInt()}');
+      
+      // 修正分页算法 - 字体小时页数应该更多
+      int charsPerPage;
+      if (screenSize.width > 600) {
+        // 平板或横屏
+        charsPerPage = (1200 * (18.0 / _fontSize)).round();
+      } else if (screenSize.height > 700) {
+        // 长屏手机  
+        charsPerPage = (900 * (18.0 / _fontSize)).round();
+      } else {
+        // 标准手机
+        charsPerPage = (700 * (18.0 / _fontSize)).round();
+      }
+      
+      // 根据行距调整 - 行距大时每页字符数应该减少
+      charsPerPage = (charsPerPage / _lineSpacing).round();
+      
+      // 根据字间距调整
+      charsPerPage = (charsPerPage * (1.0 / (1.0 + _letterSpacing * 0.1))).round();
+      
+      // 确保在合理范围内
+      charsPerPage = charsPerPage.clamp(300, 1500);
+      
+      debugPrint('📊 计算结果: 每页$charsPerPage字符 (字号${_fontSize.toInt()}, 行距${_lineSpacing.toStringAsFixed(1)})');
+      
+      // 执行智能分页
+      _smartPagination(content, charsPerPage);
+      
+      debugPrint('✅ 响应式分页完成: 总共 ${_pages.length} 页');
+      
+    } catch (e) {
+      debugPrint('❌ 分页出错: $e');
+      // 备用分页方法
+      _fallbackPagination(content);
     }
   }
-
-
-  // 最后保险分页方法 - 使用固定字符数分页
-  void _ultimateFallbackPagination(String content) {
+  
+  // 备用分页方法
+  void _fallbackPagination(String content) {
+    debugPrint('🆘 使用备用分页方法...');
     _pages.clear();
     
-    const int fixedCharsPerPage = 800; // 降低字符数，增加页数
+    const int charsPerPage = 800;
     
-    debugPrint('🆘 执行最后保险分页，固定每页$fixedCharsPerPage字符');
-    
-    for (int i = 0; i < content.length; i += fixedCharsPerPage) {
-      final end = (i + fixedCharsPerPage < content.length) ? i + fixedCharsPerPage : content.length;
-      _pages.add(content.substring(i, end));
+    for (int i = 0; i < content.length; i += charsPerPage) {
+      final end = (i + charsPerPage < content.length) ? i + charsPerPage : content.length;
+      final pageContent = content.substring(i, end).trim();
+      if (pageContent.isNotEmpty) {
+        _pages.add(pageContent);
+      }
     }
     
-    debugPrint('🆘 最后保险分页完成: 总共 ${_pages.length} 页');
-    
-    // 最后的合理性检查
-    if (_pages.length > 10000) {
-      debugPrint('❌ 分页仍然异常，内容可能有问题');
-      _pages = ['$_kErrorPrefix 分页完全失败\n\n内容长度: ${content.length}\n页数: ${_pages.length}\n\n请检查文件格式'];
+    debugPrint('🆘 备用分页完成: 总共 ${_pages.length} 页');
+  }
+  
+  // 改进的智能分页 - 在段落、句号处切分
+  void _smartPagination(String content, int targetCharsPerPage) {
+    try {
+      _pages.clear();
+      
+      if (content.isEmpty) {
+        _pages.add('内容为空');
+        return;
+      }
+      
+      int currentPos = 0;
+      int pageCount = 0;
+      const maxPages = 50000; // 防止无限循环
+      
+      while (currentPos < content.length && pageCount < maxPages) {
+        int endPos = currentPos + targetCharsPerPage;
+        
+        // 如果超出内容长度，直接到末尾
+        if (endPos >= content.length) {
+          final lastPage = content.substring(currentPos).trim();
+          if (lastPage.isNotEmpty) {
+            _pages.add(lastPage);
+          }
+          break;
+        }
+        
+        // 寻找最佳分割点
+        int actualEndPos = endPos;
+        final minEndPos = currentPos + (targetCharsPerPage * 0.6).round(); // 最小60%
+        
+        // 在合理范围内寻找分割点
+        for (int offset = 0; offset < 150; offset++) {
+          int checkPos = endPos - offset;
+          if (checkPos <= minEndPos || checkPos >= content.length) break;
+          
+          String char = content[checkPos];
+          
+          // 段落分割最优
+          if (char == '\n') {
+            actualEndPos = checkPos;
+            break;
+          }
+          // 句号分割次优  
+          else if (char == '。') {
+            actualEndPos = checkPos + 1;
+            break;
+          }
+          // 逗号、问号等分割
+          else if ('，？！；：'.contains(char)) {
+            actualEndPos = checkPos + 1;
+            break;
+          }
+        }
+        
+        // 确保 actualEndPos 有效
+        actualEndPos = actualEndPos.clamp(minEndPos, content.length);
+        
+        String pageContent = content.substring(currentPos, actualEndPos).trim();
+        if (pageContent.isNotEmpty) {
+          _pages.add(pageContent);
+        }
+        
+        currentPos = actualEndPos;
+        
+        // 跳过开头的空白字符
+        while (currentPos < content.length && content[currentPos].trim().isEmpty) {
+          currentPos++;
+        }
+        
+        pageCount++;
+      }
+      
+      // 检查是否成功分页
+      if (_pages.isEmpty) {
+        debugPrint('⚠️ 智能分页失败，使用备用方法');
+        _fallbackPagination(content);
+      }
+      
+    } catch (e) {
+      debugPrint('❌ 智能分页出错: $e');
+      _fallbackPagination(content);
     }
   }
+
+
 
   // --- Settings Persistence ---
   Future<void> _loadSettings() async {
@@ -367,8 +508,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
     saver(prefs);
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) {
+    // 响应式重新分页 - 当字体、间距、边距变化时
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted && _bookContent.isNotEmpty) {
+        debugPrint('🔄 设置变化，重新分页...');
         _splitIntoPages();
         setState(() {});
       }
@@ -392,9 +535,9 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
-    _setImmersiveMode();
-
+    
     if (_showControls) {
+      _showToolbarSheet();
       _startHideControlsTimer();
       SystemChrome.setEnabledSystemUIMode(
         SystemUiMode.manual,
@@ -490,6 +633,21 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   @override
   Widget build(BuildContext context) {
+    // 检测屏幕尺寸变化，响应式重新分页
+    final currentScreenSize = MediaQuery.of(context).size;
+    if (_lastScreenSize != null && 
+        (_lastScreenSize!.width != currentScreenSize.width || 
+         _lastScreenSize!.height != currentScreenSize.height)) {
+      debugPrint('🔄 屏幕尺寸变化，触发重新分页');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _bookContent.isNotEmpty) {
+          _splitIntoPages();
+          setState(() {});
+        }
+      });
+    }
+    _lastScreenSize = currentScreenSize;
+    
     return Scaffold(
       backgroundColor: _backgroundColor,
       body: Stack(
@@ -781,14 +939,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     
     // 根据背景颜色动态调整工具栏颜色
     final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
-    final toolbarBgColor = isLightBackground 
-        ? Colors.white.withValues(alpha: 0.95)
-        : Colors.black.withValues(alpha: 0.9);
     final textColor = isLightBackground ? Colors.black87 : Colors.white;
     final iconBgColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.2)
-        : Colors.grey.withValues(alpha: 0.3);
-    final borderColor = isLightBackground 
         ? Colors.grey.withValues(alpha: 0.2)
         : Colors.grey.withValues(alpha: 0.3);
     
@@ -807,28 +959,42 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           curve: Curves.easeOutBack,
           child: IgnorePointer(
             ignoring: !_showControls,
-            child: Container(
-              padding: EdgeInsets.only(
-                top: statusBarHeight + 8,
-                left: 16,
-                right: 16,
-                bottom: 12,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(20),
+                bottomRight: Radius.circular(20),
               ),
-              decoration: BoxDecoration(
-                color: toolbarBgColor,
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(20),
-                  bottomRight: Radius.circular(20),
-                ),
-                border: Border.all(color: borderColor, width: 1),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.only(
+                    top: statusBarHeight + 8,
+                    left: 16,
+                    right: 16,
+                    bottom: 12,
                   ),
-                ],
-              ),
+                  decoration: BoxDecoration(
+                    color: Color.lerp(_backgroundColor, 
+                        isLightBackground ? Colors.white : Colors.black, 0.15)!.withValues(alpha: 0.85),
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(20),
+                      bottomRight: Radius.circular(20),
+                    ),
+                    border: Border.all(
+                      color: isLightBackground 
+                          ? Colors.black.withValues(alpha: 0.08)
+                          : Colors.white.withValues(alpha: 0.1),
+                      width: 0.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
               child: Row(
                 children: [
                   Container(
@@ -896,6 +1062,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                   ),
                 ],
               ),
+                ),
+              ),
             ),
           ),
         ),
@@ -904,72 +1072,82 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildBottomToolbar() {
-    final double bottomPadding = MediaQuery.of(context).padding.bottom;
-    final double bottomToolbarHeight = 140 + bottomPadding;
-    final screenHeight = MediaQuery.of(context).size.height;
+    if (!_showControls) return const SizedBox.shrink();
     
-    // 根据背景颜色动态调整工具栏颜色
-    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
-    final toolbarBgColor = isLightBackground 
-        ? Colors.white.withValues(alpha: 0.95)
-        : Colors.black.withValues(alpha: 0.9);
-    final handleColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.4)
-        : Colors.grey.withValues(alpha: 0.5);
-    final borderColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.2)
-        : Colors.grey.withValues(alpha: 0.3);
-    
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 600),
-      curve: _showControls ? Curves.easeOutBack : Curves.easeInBack,
-      // 从下方弹出动画：隐藏时在屏幕底部外，显示时滑动到顶部
-      bottom: _showControls ? screenHeight - bottomToolbarHeight - 100 : -bottomToolbarHeight,
-      left: 0,
-      right: 0,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 400),
-        opacity: _showControls ? 1.0 : 0.0,
-        curve: Curves.easeInOut,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 500),
-          scale: _showControls ? 1.0 : 0.8,
-          curve: Curves.elasticOut,
-          child: Transform.translate(
-            offset: Offset(0, _showControls ? 0 : 100),
-            child: IgnorePointer(
-              ignoring: !_showControls,
+    return const SizedBox.shrink(); // 使用 showModalBottomSheet 方式
+  }
+  
+  void _showToolbarSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      isScrollControlled: true,
+      enableDrag: true,
+      isDismissible: true,
+      builder: (context) {
+        final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+        final double bottomPadding = MediaQuery.of(context).padding.bottom;
+        
+        final Color toolbarBgColor = isDarkMode 
+            ? Color.lerp(_backgroundColor, Colors.grey[800]!, 0.3)!
+            : Color.lerp(_backgroundColor, Colors.grey[100]!, 0.4)!;
+        
+        final Color handleColor = isDarkMode
+            ? Colors.white.withValues(alpha: 0.4)
+            : Colors.black.withValues(alpha: 0.3);
+        
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.only(
+            bottom: bottomPadding + 20,
+            top: 12,
+            left: 0,
+            right: 0,
+          ),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
-                padding: EdgeInsets.only(
-                  bottom: bottomPadding + 16,
-                  top: 20,
-                  left: 20,
-                  right: 20,
-                ),
                 decoration: BoxDecoration(
-                  color: toolbarBgColor,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: borderColor, width: 1),
+                  color: toolbarBgColor.withValues(alpha: 0.92),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  border: Border.all(
+                    color: isDarkMode 
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.black.withValues(alpha: 0.08),
+                    width: 0.5,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, -5),
+                      color: isDarkMode 
+                          ? Colors.black.withValues(alpha: 0.4)
+                          : Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 24,
+                      offset: const Offset(0, -8),
+                      spreadRadius: 0,
                     ),
                   ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 可拖拽的小横条
                     Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: handleColor,
-                        borderRadius: BorderRadius.circular(2),
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: handleColor,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 16),
                     _buildProgressSlider(),
                     const SizedBox(height: 16),
                     _buildToolbarButtons(),
@@ -978,217 +1156,297 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
   Widget _buildToolbarButtons() {
-    // 根据背景颜色动态调整按钮样式
-    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
-    final buttonBgColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.1)
-        : Colors.grey.withValues(alpha: 0.2);
-    final borderColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.2)
-        : Colors.grey.withValues(alpha: 0.3);
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: buttonBgColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor, width: 1),
-      ),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _SimpleToolbarButton(
+          _ModernToolbarButton(
             icon: Icons.format_list_bulleted_rounded,
             label: '目录',
             onTap: _showTableOfContents,
-            isLightBackground: isLightBackground,
+            isDarkMode: isDarkMode,
           ),
-          _buildDivider(),
-          _SimpleToolbarButton(
+          _ModernToolbarButton(
             icon: Icons.tune_rounded,
             label: '设置',
             onTap: _showSettingsPanel,
-            isLightBackground: isLightBackground,
+            isDarkMode: isDarkMode,
           ),
-          _buildDivider(),
-          _SimpleToolbarButton(
+          _ModernToolbarButton(
+            icon: Icons.palette_rounded,
+            label: '主题',
+            onTap: _showThemePanel,
+            isDarkMode: isDarkMode,
+          ),
+          _ModernToolbarButton(
             icon: Icons.bookmark_add_rounded,
             label: '书签',
             onTap: _showBookmarks,
-            isLightBackground: isLightBackground,
+            isDarkMode: isDarkMode,
           ),
-          _buildDivider(),
-          _SimpleToolbarButton(
+          _ModernToolbarButton(
             icon: Icons.more_horiz_rounded,
             label: '更多',
             onTap: _showMoreOptions,
-            isLightBackground: isLightBackground,
+            isDarkMode: isDarkMode,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDivider() {
-    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
-    final dividerColor = isLightBackground 
-        ? Colors.grey.withValues(alpha: 0.3)
-        : Colors.white.withValues(alpha: 0.3);
-    return Container(
-      width: 1, 
-      height: 20, 
-      color: dividerColor,
-    );
-  }
 
   Widget _buildProgressSlider() {
     final progress = _pages.isNotEmpty ? (_currentPageIndex + 1) / _pages.length : 0.0;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
-    // 主题颜色
-    final containerBgColor = isDarkMode 
-        ? Colors.grey[850]!.withValues(alpha: 0.8)
-        : Colors.grey[100]!.withValues(alpha: 0.9);
-    final containerBorderColor = isDarkMode 
-        ? Colors.grey[700]!.withValues(alpha: 0.6)
-        : Colors.grey[300]!.withValues(alpha: 0.8);
-    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
-    final progressBadgeColor = isDarkMode 
-        ? Colors.blue[600]!.withValues(alpha: 0.8)
-        : Colors.blue[500]!.withValues(alpha: 0.9);
-    
-    // 滑块颜色
-    final activeTrackColor = isDarkMode ? Colors.blue[400]! : Colors.blue[500]!;
-    final inactiveTrackColor = isDarkMode 
-        ? Colors.grey[600]!.withValues(alpha: 0.5)
-        : Colors.grey[300]!.withValues(alpha: 0.8);
-    final thumbColor = isDarkMode ? Colors.blue[300]! : Colors.blue[600]!;
+    // 使用主题相关但有对比度的颜色
+    final Color sliderBgColor = isDarkMode 
+        ? Color.lerp(_backgroundColor, Colors.grey[850]!, 0.4)!
+        : Color.lerp(_backgroundColor, Colors.white, 0.6)!;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: containerBgColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: containerBorderColor, width: 1),
+        color: sliderBgColor.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDarkMode 
+              ? Colors.white.withValues(alpha: 0.1)
+              : Colors.black.withValues(alpha: 0.08),
+          width: 0.5,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: isDarkMode 
+                ? Colors.black.withValues(alpha: 0.3)
+                : Colors.black.withValues(alpha: 0.1),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 13,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
+                style: TextStyle(
+                  color: isDarkMode ? Colors.white : Colors.black87,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.blue[600] : Colors.blue[500],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${(progress * 100).toStringAsFixed(1)}%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: progressBadgeColor,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: progressBadgeColor.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    '${(progress * 100).toStringAsFixed(1)}%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.2,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 6,
+              thumbShape: RoundSliderThumbShape(
+                enabledThumbRadius: 12,
+              ),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+              activeTrackColor: isDarkMode ? Colors.blue[400] : Colors.blue[500],
+              inactiveTrackColor: isDarkMode 
+                  ? Colors.grey[700]
+                  : Colors.grey[300],
+              thumbColor: isDarkMode ? Colors.blue[400] : Colors.blue[600],
+              overlayColor: (isDarkMode ? Colors.blue[400] : Colors.blue[500])!.withValues(alpha: 0.2),
+            ),
+            child: Slider(
+              value: _pages.isNotEmpty ? _currentPageIndex.toDouble().clamp(0, (_pages.length - 1).toDouble()) : 0.0,
+              min: 0,
+              max: (_pages.isNotEmpty ? _pages.length - 1 : 0).toDouble(),
+              divisions: _pages.isNotEmpty ? _pages.length - 1 : null,
+              label: _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
+              onChanged: _pages.isNotEmpty ? (value) => setState(() => _currentPageIndex = value.toInt()) : null,
+              onChangeEnd: _pages.isNotEmpty
+                  ? (value) {
+                      _pageController.animateToPage(
+                        value.toInt(),
+                        duration: const Duration(milliseconds: 350),
+                        curve: Curves.easeInOut,
+                      );
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '总进度',
+                style: TextStyle(
+                  color: (isDarkMode ? Colors.white : Colors.black87).withValues(alpha: 0.7),
+                  fontSize: 12,
+                ),
+              ),
+              Text(
+                _pages.isNotEmpty ? '共 ${_pages.length} 页' : '共 0 页',
+                style: TextStyle(
+                  color: isDarkMode ? Colors.white : Colors.black87,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 主题面板 ---
+  void _showThemePanel() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      isScrollControlled: true,
+      enableDrag: true,
+      isDismissible: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+            final panelBgColor = isDarkMode 
+                ? Colors.grey[900]!.withValues(alpha: 0.98)
+                : Colors.grey[50]!.withValues(alpha: 0.98);
+            
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              height: MediaQuery.of(context).size.height * 0.6,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: panelBgColor,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    ),
+                    child: Column(
+                      children: [
+                        // 拖拽指示器
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: Container(
+                              width: 40,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: isDarkMode 
+                                    ? Colors.grey[600] 
+                                    : Colors.grey[400],
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 标题栏
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Icons.palette_rounded, 
+                                  color: Colors.purple[600], 
+                                  size: 24
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
+                                '阅读主题',
+                                style: TextStyle(
+                                  color: isDarkMode ? Colors.white : Colors.grey[800], 
+                                  fontSize: 22, 
+                                  fontWeight: FontWeight.w700
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // 主题内容
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(20),
+                            child: _buildEnhancedColorThemeSelector(setModalState, isDarkMode),
+                          ),
+                        ),
+                        // 底部按钮
+                        Container(
+                          padding: EdgeInsets.only(
+                            left: 24,
+                            right: 24,
+                            bottom: MediaQuery.of(context).padding.bottom + 20,
+                            top: 16,
+                          ),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.purple[600],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                elevation: 0,
+                              ),
+                              child: const Text('完成', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 8, // 增加轨道高度
-                thumbShape: CustomSliderThumbShape(
-                  enabledThumbRadius: 14,
-                  thumbColor: thumbColor,
-                ),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
-                activeTrackColor: activeTrackColor,
-                inactiveTrackColor: inactiveTrackColor,
-                overlayColor: activeTrackColor.withValues(alpha: 0.2),
-                valueIndicatorShape: const PaddleSliderValueIndicatorShape(),
-                valueIndicatorColor: thumbColor,
-                valueIndicatorTextStyle: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                trackShape: CustomSliderTrackShape(),
               ),
-              child: Slider(
-                value: _pages.isNotEmpty ? _currentPageIndex.toDouble().clamp(0, (_pages.length - 1).toDouble()) : 0.0,
-                min: 0,
-                max: (_pages.isNotEmpty ? _pages.length - 1 : 0).toDouble(),
-                divisions: _pages.isNotEmpty ? _pages.length - 1 : null,
-                label: _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
-                onChanged: _pages.isNotEmpty ? (value) => setState(() => _currentPageIndex = value.toInt()) : null,
-                onChangeEnd: _pages.isNotEmpty
-                    ? (value) {
-                        _pageController.animateToPage(
-                          value.toInt(),
-                          duration: const Duration(milliseconds: 350),
-                          curve: Curves.easeInOut,
-                        );
-                      }
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '总进度',
-                  style: TextStyle(
-                    color: textColor.withValues(alpha: 0.7),
-                    fontSize: 11,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                Text(
-                  _pages.isNotEmpty ? '共 ${_pages.length} 页' : '共 0 页',
-                  style: TextStyle(
-                    color: textColor.withValues(alpha: 0.9),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1217,7 +1475,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             
             return AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              height: MediaQuery.of(context).size.height * 0.85,
+              height: MediaQuery.of(context).size.height * 0.6,
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
                 child: BackdropFilter(
@@ -1415,15 +1673,6 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                                         _saveSetting((p) => p.setDouble('horizontalPadding', v));
                                       },
                                     ),
-                                  ],
-                                ),
-                                const SizedBox(height: 24),
-                                _buildSettingSection(
-                                  title: '主题设置',
-                                  icon: Icons.palette_rounded,
-                                  isDarkMode: isDarkMode,
-                                  children: [
-                                    _buildEnhancedColorThemeSelector(setModalState, isDarkMode),
                                   ],
                                 ),
                                 const SizedBox(height: 24),
@@ -2294,47 +2543,112 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 }
 
-// 简单工具栏按钮
-class _SimpleToolbarButton extends StatelessWidget {
+// 现代化工具栏按钮
+class _ModernToolbarButton extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool isLightBackground;
+  final bool isDarkMode;
 
-  const _SimpleToolbarButton({
+  const _ModernToolbarButton({
     required this.icon,
     required this.label,
     required this.onTap,
-    this.isLightBackground = false,
+    this.isDarkMode = false,
   });
 
   @override
+  State<_ModernToolbarButton> createState() => _ModernToolbarButtonState();
+}
+
+class _ModernToolbarButtonState extends State<_ModernToolbarButton> 
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<Color?> _colorAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 150),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.95,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+    
+    final baseColor = Colors.transparent;
+    final pressedColor = widget.isDarkMode
+        ? Colors.white.withValues(alpha: 0.15)
+        : Colors.black.withValues(alpha: 0.08);
+    
+    _colorAnimation = ColorTween(
+      begin: baseColor,
+      end: pressedColor,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final iconColor = isLightBackground ? Colors.black87 : Colors.white;
+    final iconColor = widget.isDarkMode ? Colors.white : Colors.black87;
     
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon, 
-              color: iconColor, 
-              size: 18
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: iconColor,
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
+      onTapDown: (_) => _controller.forward(),
+      onTapUp: (_) => _controller.reverse(),
+      onTapCancel: () => _controller.reverse(),
+      onTap: () {
+        widget.onTap();
+        HapticFeedback.mediumImpact();
+      },
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleAnimation.value,
+            child: Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: _colorAnimation.value,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    widget.icon,
+                    color: iconColor,
+                    size: 22,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: iconColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
