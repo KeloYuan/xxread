@@ -39,6 +39,7 @@ dependencies:
   shared_preferences: ^2.2.2
   sqflite: ^2.3.0 # 移动平台数据库
   path: ^1.9.1 # 数据库路径处理
+  crypto: ^3.0.3 # 加密和哈希计算
   
   # EPUB 支持
   epubx: ^4.0.0
@@ -108,12 +109,12 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
 
-# Flutter应用图标配置 (已手动设置完成)
-# flutter_launcher_icons:
-#   android: "launcher_icon"
-#   ios: true
-#   image_path: "assets/images/app_icon.png"
-#   min_sdk_android: 21
-#   adaptive_icon_background: "#FFFFFF"
-#   adaptive_icon_foreground: "assets/images/app_icon.png"
+# Flutter应用图标配置
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_icon.png"
 

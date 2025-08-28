@@ -328,13 +328,13 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
       final summary = await _statsDao.getSummaryStats();
       final weekly = await _statsDao.getWeeklyChartData();
       final achievements = await _statsDao.getAchievementStats();
-      final books = await _bookDao.getAllBooks();
+      final bookCount = await _bookDao.getBooksCount();
       
       setState(() {
         _summaryStats = summary;
         _weeklyData = weekly;
         _achievementStats = achievements;
-        _bookCount = books.length;
+        _bookCount = bookCount;
         _isLoading = false;
       });
     } catch (e) {

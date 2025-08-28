@@ -8,7 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
+import '../models/bookmark.dart';
 import '../services/book_dao.dart';
+import '../services/bookmark_dao.dart';
 import '../services/reading_stats_dao.dart';
 import '../widgets/custom_slider_components.dart';
 import '../utils/responsive_helper.dart';
@@ -26,6 +28,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   late final PageController _pageController;
   final _bookDao = BookDao();
   final _statsDao = ReadingStatsDao();
+  final _bookmarkDao = BookmarkDao();
 
   // --- Content & Pages ---
   List<String> _pages = [];
@@ -37,6 +40,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   bool _showControls = false; // 默认隐藏工具栏
   Timer? _hideControlsTimer;
   DateTime? _sessionStartTime;
+  
+  // --- Bookmark State ---
+  List<Bookmark> _bookmarks = [];
+  bool _isCurrentPageBookmarked = false;
 
   // --- Reading Settings ---
   double _fontSize = 18.0;
@@ -60,11 +67,13 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     _currentPageIndex = widget.book.currentPage;
     _pageController = PageController(initialPage: _currentPageIndex);
     _sessionStartTime = DateTime.now();
+    
 
     // 进入沉浸式模式
     _setImmersiveMode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadBookmarks();
       _initializeReading();
     });
   }
@@ -107,8 +116,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   void _showControlsInitially() {
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted && !_showControls) {
-        setState(() => _showControls = true);
-        _startHideControlsTimer();
+        _showControlsWithAnimation();
       }
     });
   }
@@ -320,9 +328,9 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     }
   }
 
-  // 响应式分页算法 - 根据屏幕和设置动态计算
+  // 精确分页算法 - 基于真实可用区域计算字符数
   void _standardizedPagination(String content) {
-    debugPrint('📱 开始响应式分页...');
+    debugPrint('📱 开始精确分页算法...');
     
     try {
       if (content.isEmpty) {
@@ -330,50 +338,93 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         return;
       }
       
-      // 获取屏幕尺寸和可用区域
+      // 获取屏幕尺寸和系统边距
       final screenSize = MediaQuery.of(context).size;
-      final padding = MediaQuery.of(context).padding;
+      final systemPadding = MediaQuery.of(context).padding;
       
-      // 计算实际可用的文本区域，防止溢出
-      final availableWidth = (screenSize.width - (_horizontalPadding * 2)).clamp(200.0, double.infinity);
-      final availableHeight = (screenSize.height - padding.top - padding.bottom - 200).clamp(300.0, double.infinity);
+      // 计算精确的可用区域 - 考虑所有可能的遮挡
+      final statusBarHeight = systemPadding.top;
+      final navigationBarHeight = systemPadding.bottom;
+      debugPrint('📐 屏幕信息: ${screenSize.width.toInt()}x${screenSize.height.toInt()}');
+      debugPrint('📐 系统边距: 状态栏${statusBarHeight.toInt()}px, 导航栏${navigationBarHeight.toInt()}px');
       
-      debugPrint('📏 可用文本区域: ${availableWidth.toInt()}x${availableHeight.toInt()}');
+      // 根据字体设置和新布局精确计算每页字符数
+      final charsPerPage = _calculateOptimalCharsPerPage(screenSize.width, screenSize.height);
       
-      // 修正分页算法 - 字体小时页数应该更多
-      int charsPerPage;
-      if (screenSize.width > 600) {
-        // 平板或横屏
-        charsPerPage = (1200 * (18.0 / _fontSize)).round();
-      } else if (screenSize.height > 700) {
-        // 长屏手机  
-        charsPerPage = (900 * (18.0 / _fontSize)).round();
-      } else {
-        // 标准手机
-        charsPerPage = (700 * (18.0 / _fontSize)).round();
-      }
-      
-      // 根据行距调整 - 行距大时每页字符数应该减少
-      charsPerPage = (charsPerPage / _lineSpacing).round();
-      
-      // 根据字间距调整
-      charsPerPage = (charsPerPage * (1.0 / (1.0 + _letterSpacing * 0.1))).round();
-      
-      // 确保在合理范围内
-      charsPerPage = charsPerPage.clamp(300, 1500);
-      
-      debugPrint('📊 计算结果: 每页$charsPerPage字符 (字号${_fontSize.toInt()}, 行距${_lineSpacing.toStringAsFixed(1)})');
+      debugPrint('📊 计算结果: 每页$charsPerPage字符 (字号${_fontSize.toInt()}px, 行距${_lineSpacing.toStringAsFixed(1)}, 字间距${_letterSpacing.toStringAsFixed(1)})');
       
       // 执行智能分页
       _smartPagination(content, charsPerPage);
       
-      debugPrint('✅ 响应式分页完成: 总共 ${_pages.length} 页');
+      // 验证分页结果，确保文字能完全显示
+      _validatePagination(screenSize.width, screenSize.height);
+      
+      debugPrint('✅ 精确分页完成: 总共 ${_pages.length} 页');
       
     } catch (e) {
       debugPrint('❌ 分页出错: $e');
       // 备用分页方法
       _fallbackPagination(content);
     }
+  }
+  
+  /// 基于TextPainter精确计算每页字符数
+  int _calculateOptimalCharsPerPage(double screenWidth, double screenHeight) {
+    // 使用与 _buildPageWidget 相同的精确计算逻辑
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final systemBottomPadding = MediaQuery.of(context).padding.bottom;
+    
+    // 固定留白 + 控制栏空间预留
+    final topPadding = 40.0;    
+    final baseBottomPadding = 40.0; // 与页面显示保持一致
+    final controlsSpace = 100.0;    // 与页面显示保持一致
+    final totalBottomPadding = baseBottomPadding + controlsSpace;
+    
+    // 计算实际可用的文本显示区域
+    final availableWidth = screenWidth - (_horizontalPadding * 2);
+    final availableHeight = screenHeight - topPadding - totalBottomPadding - statusBarHeight - systemBottomPadding;
+    
+    // 确保有最小可用区域
+    final safeWidth = availableWidth.clamp(200.0, double.infinity);
+    final safeHeight = availableHeight.clamp(200.0, double.infinity);
+    
+    // 使用TextPainter精确测量文本
+    final textStyle = TextStyle(
+      fontSize: _fontSize,
+      height: _lineSpacing,
+      letterSpacing: _letterSpacing,
+      fontFamily: _fontFamily == 'System' ? null : _fontFamily,
+    );
+    
+    // 测量单个字符的宽度（使用常见中文字符）
+    final singleCharPainter = TextPainter(
+      text: TextSpan(text: '中', style: textStyle),
+      textDirection: TextDirection.ltr,
+    );
+    singleCharPainter.layout();
+    final charWidth = singleCharPainter.size.width;
+    final lineHeight = singleCharPainter.size.height;
+    
+    // 计算每行可以显示的字符数（保留更多余量确保文字完全可见）
+    final charsPerLine = ((safeWidth - 20) / charWidth).floor(); // 减去20px安全边距
+    
+    // 计算可以显示的最大行数（保留更多余量避免被截断）
+    final maxLines = ((safeHeight - lineHeight) / lineHeight).floor(); // 减去一行高度余量
+    
+    // 计算每页总字符数
+    int totalChars = maxLines * charsPerLine;
+    
+    // 确保在合理范围内
+    totalChars = totalChars.clamp(100, 3000);
+    
+    debugPrint('📝 精确分页详情: 行高${lineHeight.toInt()}px, 最大行数$maxLines行, 每行$charsPerLine字');
+    debugPrint('📝 字符宽度: ${charWidth.toInt()}px, 可用区域: ${safeWidth.toInt()}x${safeHeight.toInt()}px');
+    debugPrint('📝 总计: $totalChars字符/页');
+    
+    // 释放TextPainter资源
+    singleCharPainter.dispose();
+    
+    return totalChars;
   }
   
   // 备用分页方法
@@ -422,27 +473,27 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         
         // 寻找最佳分割点
         int actualEndPos = endPos;
-        final minEndPos = currentPos + (targetCharsPerPage * 0.6).round(); // 最小60%
+        final minEndPos = currentPos + (targetCharsPerPage * 0.7).round(); // 提高到70%，确保页面内容充实
         
         // 在合理范围内寻找分割点
-        for (int offset = 0; offset < 150; offset++) {
+        for (int offset = 0; offset < 100; offset++) { // 减少搜索范围，避免页面过短
           int checkPos = endPos - offset;
           if (checkPos <= minEndPos || checkPos >= content.length) break;
           
           String char = content[checkPos];
           
-          // 段落分割最优
-          if (char == '\n') {
-            actualEndPos = checkPos;
+          // 段落分割最优（在换行符后分页）
+          if (char == '\n' && checkPos + 1 < content.length) {
+            actualEndPos = checkPos + 1; // 保留换行符在前一页
             break;
           }
           // 句号分割次优  
-          else if (char == '。') {
+          else if (char == '。' && checkPos + 1 < content.length) {
             actualEndPos = checkPos + 1;
             break;
           }
           // 逗号、问号等分割
-          else if ('，？！；：'.contains(char)) {
+          else if ('，？！；：'.contains(char) && checkPos + 1 < content.length) {
             actualEndPos = checkPos + 1;
             break;
           }
@@ -458,8 +509,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         
         currentPos = actualEndPos;
         
-        // 跳过开头的空白字符
-        while (currentPos < content.length && content[currentPos].trim().isEmpty) {
+        // 只跳过换行符，避免跳过有意义的空格和内容
+        while (currentPos < content.length && content[currentPos] == '\n') {
           currentPos++;
         }
         
@@ -478,7 +529,50 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     }
   }
 
-
+  /// 验证分页结果，确保文字能完全显示在可视区域内
+  void _validatePagination(double screenWidth, double screenHeight) {
+    if (_pages.isEmpty) return;
+    
+    final textStyle = TextStyle(
+      fontSize: _fontSize,
+      height: _lineSpacing,
+      letterSpacing: _letterSpacing,
+      fontFamily: _fontFamily == 'System' ? null : _fontFamily,
+    );
+    
+    // 计算可用区域（与_calculateOptimalCharsPerPage保持一致）
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final systemBottomPadding = MediaQuery.of(context).padding.bottom;
+    final topPadding = 40.0;    
+    final baseBottomPadding = 40.0; // 与页面显示保持一致
+    final controlsSpace = 100.0;    // 与页面显示保持一致
+    final totalBottomPadding = baseBottomPadding + controlsSpace;
+    final availableWidth = screenWidth - (_horizontalPadding * 2) - 20; // 减去安全边距
+    final availableHeight = screenHeight - topPadding - totalBottomPadding - statusBarHeight - systemBottomPadding;
+    
+    int oversizedPages = 0;
+    for (int i = 0; i < _pages.length && i < 5; i++) { // 只检查前5页避免影响性能
+      final painter = TextPainter(
+        text: TextSpan(text: _pages[i], style: textStyle),
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.justify,
+      );
+      painter.layout(maxWidth: availableWidth);
+      
+      if (painter.size.height > availableHeight) {
+        oversizedPages++;
+        debugPrint('⚠️ 第${i + 1}页内容超出可视区域: ${painter.size.height.toInt()}px > ${availableHeight.toInt()}px');
+      }
+      
+      painter.dispose();
+    }
+    
+    if (oversizedPages > 0) {
+      debugPrint('⚠️ 发现 $oversizedPages 页内容可能超出可视区域，建议调整字体设置');
+    } else {
+      debugPrint('✅ 分页验证通过，所有文字都能完全显示在可视区域内');
+    }
+  }
 
   // --- Settings Persistence ---
   Future<void> _loadSettings() async {
@@ -520,6 +614,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   // --- UI Controls ---
   void _setImmersiveMode() {
+    final isLightBackground = _backgroundColor.computeLuminance() > 0.5;
+    
     if (!_showControls) {
       SystemChrome.setEnabledSystemUIMode(
         SystemUiMode.immersiveSticky,
@@ -530,43 +626,44 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         SystemUiMode.manual,
         overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
       );
+      
+      // 设置系统UI样式与控制栏颜色保持一致
+      final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+      final Color navigationBarColor = isDarkMode 
+          ? Color.lerp(_backgroundColor, Colors.grey[800]!, 0.3)!
+          : Color.lerp(_backgroundColor, Colors.grey[100]!, 0.4)!;
+      
+      SystemChrome.setSystemUIOverlayStyle(
+        SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: isLightBackground ? Brightness.dark : Brightness.light,
+          systemNavigationBarColor: navigationBarColor,
+          systemNavigationBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark,
+        ),
+      );
     }
   }
 
   void _toggleControls() {
-    setState(() => _showControls = !_showControls);
-    
     if (_showControls) {
-      _showToolbarSheet();
-      _startHideControlsTimer();
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
-      );
+      _hideControls();
     } else {
-      _hideControlsTimer?.cancel();
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (!_showControls) {
-          SystemChrome.setEnabledSystemUIMode(
-            SystemUiMode.immersiveSticky,
-            overlays: [],
-          );
-        }
-      });
+      _showControlsWithAnimation();
+    }
+  }
+  
+  void _showControlsWithAnimation() {
+    if (!_showControls) {
+      setState(() => _showControls = true);
+      _startHideControlsTimer();
+      _setImmersiveMode(); // 使用统一的方法设置系统UI
     }
   }
 
   void _hideControls() {
     if (_showControls) {
       setState(() => _showControls = false);
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (!_showControls) {
-          SystemChrome.setEnabledSystemUIMode(
-            SystemUiMode.immersiveSticky,
-            overlays: [],
-          );
-        }
-      });
+      _setImmersiveMode(); // 使用统一的方法设置系统UI
     }
   }
 
@@ -577,6 +674,9 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   void _onPageTurn() {
     if (!mounted) return;
+    
+    // 检查当前页面书签状态
+    _checkCurrentPageBookmark();
     
     // 不立即隐藏控件，让用户有时间看到页面变化
     if (_showControls) {
@@ -653,17 +753,19 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: GestureDetector(
-              onTapUp: _handleTap,
-              onHorizontalDragEnd: _handleHorizontalDragEnd,
-              child: Container(
-                color: Colors.transparent,
-                child: _buildMainContent(),
+            child: RepaintBoundary(
+              child: GestureDetector(
+                onTapUp: _handleTap,
+                onHorizontalDragEnd: _handleHorizontalDragEnd,
+                child: Container(
+                  color: Colors.transparent,
+                  child: _buildMainContent(),
+                ),
               ),
             ),
           ),
-          if (_showControls) _buildControlsOverlay(),
-          _buildPageIndicators(),
+          _buildControlsOverlay(),
+          RepaintBoundary(child: _buildPageIndicators()),
         ],
       ),
     );
@@ -800,13 +902,21 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildPageIndicators() {
-    if (_showControls) return Container();
+    // 当控制栏显示时，页面指示器向下滑动隐藏
+    final opacity = _showControls ? 0.0 : 1.0;
+    final offset = _showControls ? 50.0 : 0.0;
     
-    return Positioned(
-      bottom: 30,
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      bottom: 30 + offset, // 修复位置逻辑：基础30px + 动态偏移
       left: 0,
       right: 0,
-      child: _buildPageNumber(),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 300),
+        opacity: opacity,
+        child: _buildPageNumber(),
+      ),
     );
   }
 
@@ -886,50 +996,59 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     final horizontalPadding = isDoublePage 
         ? _horizontalPadding * 0.5  // 双页时减少内边距
         : _horizontalPadding;
-    final topPadding = isDoublePage ? 10.0 : 20.0;
-    final bottomPadding = isDoublePage ? 60.0 : 80.0;
     
-    return Container(
-      color: _backgroundColor,
-      width: double.infinity,
-      height: double.infinity,
-      child: SafeArea(
-        bottom: false,
+    // 简化留白计算，确保文字完整显示
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    
+    // 适度的固定留白，确保文字完整显示
+    final topPadding = isDoublePage ? 30.0 : 40.0;
+    // 优化底部留白，减少过多的空白区域
+    final baseBottomPadding = isDoublePage ? 30.0 : 40.0; // 减少基础底部留白
+    final toolbarSpace = 100.0; // 减少控制栏预留空间
+    final bottomPadding = baseBottomPadding + toolbarSpace;
+    
+    return RepaintBoundary(
+      child: Container(
+        color: _backgroundColor,
+        width: double.infinity,
+        height: double.infinity,
+        child: SafeArea(
+        top: false,   // 顶部由我们自己控制
+        bottom: true, // 底部使用SafeArea确保不被导航栏遮挡
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-          child: Column(
-            children: [
-              SizedBox(height: topPadding),
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.only(bottom: bottomPadding),
-                  child: Text(
-                    pageContent,
-                    style: TextStyle(
-                      fontSize: _fontSize,
-                      height: _lineSpacing,
-                      letterSpacing: _letterSpacing,
-                      color: _fontColor,
-                      fontFamily: _fontFamily == 'System' ? null : _fontFamily,
-                    ),
-                    textAlign: TextAlign.justify,
-                  ),
-                ),
-              ),
-            ],
+          padding: EdgeInsets.only(
+            left: horizontalPadding,
+            right: horizontalPadding,
+            top: topPadding + statusBarHeight,
+            bottom: bottomPadding,
+          ),
+          child: Text(
+            pageContent,
+            style: TextStyle(
+              fontSize: _fontSize,
+              height: _lineSpacing,
+              letterSpacing: _letterSpacing,
+              color: _fontColor,
+              fontFamily: _fontFamily == 'System' ? null : _fontFamily,
+            ),
+            textAlign: TextAlign.justify,
           ),
         ),
+      ),
       ),
     );
   }
 
   Widget _buildControlsOverlay() {
-    return Stack(
-      children: [
-        _buildTopBar(),
-        _buildBottomToolbar(),
-      ],
+    return RepaintBoundary(
+      child: Stack(
+        children: [
+          // 顶部工具栏 - 标题栏在顶部
+          _buildTopBar(),
+          // 底部工具栏 - 控制栏在底部
+          _buildBottomToolbar(),
+        ],
+      ),
     );
   }
 
@@ -945,20 +1064,17 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         : Colors.grey.withValues(alpha: 0.3);
     
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutExpo,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
       top: _showControls ? 0 : -topBarHeight,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 300),
         opacity: _showControls ? 1.0 : 0.0,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 400),
-          scale: _showControls ? 1.0 : 0.9,
-          curve: Curves.easeOutBack,
-          child: IgnorePointer(
-            ignoring: !_showControls,
+        curve: Curves.easeInOut,
+        child: IgnorePointer(
+          ignoring: !_showControls,
             child: ClipRRect(
               borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(20),
@@ -1065,108 +1181,94 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                 ),
               ),
             ),
-          ),
         ),
       ),
     );
   }
 
   Widget _buildBottomToolbar() {
-    if (!_showControls) return const SizedBox.shrink();
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final double bottomPadding = MediaQuery.of(context).padding.bottom;
     
-    return const SizedBox.shrink(); // 使用 showModalBottomSheet 方式
-  }
-  
-  void _showToolbarSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
-      isScrollControlled: true,
-      enableDrag: true,
-      isDismissible: true,
-      builder: (context) {
-        final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-        final double bottomPadding = MediaQuery.of(context).padding.bottom;
-        
-        final Color toolbarBgColor = isDarkMode 
-            ? Color.lerp(_backgroundColor, Colors.grey[800]!, 0.3)!
-            : Color.lerp(_backgroundColor, Colors.grey[100]!, 0.4)!;
-        
-        final Color handleColor = isDarkMode
-            ? Colors.white.withValues(alpha: 0.4)
-            : Colors.black.withValues(alpha: 0.3);
-        
-        return Container(
-          width: double.infinity,
-          padding: EdgeInsets.only(
-            bottom: bottomPadding + 20,
-            top: 12,
-            left: 0,
-            right: 0,
-          ),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: toolbarBgColor.withValues(alpha: 0.92),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                  border: Border.all(
-                    color: isDarkMode 
-                        ? Colors.white.withValues(alpha: 0.1)
-                        : Colors.black.withValues(alpha: 0.08),
-                    width: 0.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: isDarkMode 
-                          ? Colors.black.withValues(alpha: 0.4)
-                          : Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 24,
-                      offset: const Offset(0, -8),
-                      spreadRadius: 0,
-                    ),
-                  ],
+    final Color toolbarBgColor = isDarkMode 
+        ? Color.lerp(_backgroundColor, Colors.grey[800]!, 0.3)!
+        : Color.lerp(_backgroundColor, Colors.grey[100]!, 0.4)!;
+    
+    final Color handleColor = isDarkMode
+        ? Colors.white.withValues(alpha: 0.4)
+        : Colors.black.withValues(alpha: 0.3);
+    
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      bottom: _showControls ? 0 : -200,
+      left: 0,
+      right: 0,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 300),
+        opacity: _showControls ? 1.0 : 0.0,
+        child: IgnorePointer(
+          ignoring: !_showControls,
+          child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.only(
+          bottom: bottomPadding + 8, // 减少底部内边距
+          top: 8,                    // 减少顶部内边距
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              decoration: BoxDecoration(
+                color: toolbarBgColor.withValues(alpha: 0.95),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border.all(
+                  color: isDarkMode 
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.black.withValues(alpha: 0.08),
+                  width: 0.5,
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 可拖拽的小横条
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: Container(
-                          width: 48,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: handleColor,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 可拖拽的小横条指示器
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 8), // 减少垂直内边距
+                    child: Center(
+                      child: Container(
+                        width: 48,
+                        height: 4, // 减少高度
+                        decoration: BoxDecoration(
+                          color: handleColor,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
-                    _buildProgressSlider(),
-                    const SizedBox(height: 16),
-                    _buildToolbarButtons(),
-                  ],
-                ),
+                  ),
+                  _buildProgressSlider(),
+                  const SizedBox(height: 8), // 减少间距
+                  _buildToolbarButtons(),
+                ],
               ),
             ),
           ),
-        );
-      },
+        ),
+        ),
+        ),
+      ),
     );
   }
+  
 
   Widget _buildToolbarButtons() {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), // 减少顶部内边距，增加底部内边距确保按钮不贴边
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
@@ -1189,7 +1291,9 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             isDarkMode: isDarkMode,
           ),
           _ModernToolbarButton(
-            icon: Icons.bookmark_add_rounded,
+            icon: _isCurrentPageBookmarked 
+                ? Icons.bookmark_rounded
+                : Icons.bookmark_add_rounded,
             label: '书签',
             onTap: _showBookmarks,
             isDarkMode: isDarkMode,
@@ -1217,7 +1321,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), // 减少垂直内边距
       decoration: BoxDecoration(
         color: sliderBgColor.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(16),
@@ -1331,7 +1435,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
+      barrierColor: Colors.transparent, // 去除阴影遮挡
       isScrollControlled: true,
       enableDrag: true,
       isDismissible: true,
@@ -1455,7 +1559,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.6),
+      barrierColor: Colors.transparent, // 去除阴影遮挡
       isScrollControlled: true,
       enableDrag: true,
       isDismissible: true,
@@ -2186,6 +2290,134 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     );
   }
 
+  // --- Bookmark Management ---
+  Future<void> _loadBookmarks() async {
+    try {
+      final bookmarks = await _bookmarkDao.getBookmarksForBook(widget.book.id!);
+      if (mounted) {
+        setState(() {
+          _bookmarks = bookmarks;
+          _checkCurrentPageBookmark();
+        });
+      }
+    } catch (e) {
+      debugPrint('加载书签失败: $e');
+    }
+  }
+
+  void _checkCurrentPageBookmark() {
+    _isCurrentPageBookmarked = _bookmarks.any(
+      (bookmark) => bookmark.pageNumber == _currentPageIndex + 1,
+    );
+  }
+
+  Future<void> _addBookmark() async {
+    try {
+      final bookmark = Bookmark(
+        bookId: widget.book.id!,
+        pageNumber: _currentPageIndex + 1,
+        note: '',
+        createDate: DateTime.now(),
+      );
+
+      await _bookmarkDao.insertBookmark(bookmark);
+      await _loadBookmarks(); // 重新加载书签列表
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已添加书签：第${_currentPageIndex + 1}页'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('添加书签失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('添加书签失败'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeBookmark() async {
+    try {
+      await _bookmarkDao.deleteBookmarkOnPage(
+        widget.book.id!,
+        _currentPageIndex + 1,
+      );
+      await _loadBookmarks(); // 重新加载书签列表
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已删除书签：第${_currentPageIndex + 1}页'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('删除书签失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('删除书签失败'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteBookmark(int bookmarkId) async {
+    try {
+      await _bookmarkDao.deleteBookmark(bookmarkId);
+      await _loadBookmarks();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('书签已删除'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('删除书签失败: $e');
+    }
+  }
+
+  void _goToBookmark(int pageNumber) {
+    Navigator.pop(context); // 关闭书签面板
+    _goToPage(pageNumber - 1); // pageNumber是从1开始的，而pageIndex是从0开始的
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      return '今天 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays == 1) {
+      return '昨天 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}天前';
+    } else {
+      return '${date.month}月${date.day}日';
+    }
+  }
+
   // --- TOC / Bookmarks / More ---
   void _showTableOfContents() {
     showModalBottomSheet(
@@ -2320,24 +2552,206 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
 
   Widget _buildBookmarksPanel() {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.8),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Text('书签', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-              SizedBox(height: 20),
-              Text('暂无书签', style: TextStyle(color: Colors.white70)),
-              SizedBox(height: 20),
-            ],
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.7,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.85),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              children: [
+                // 标题栏
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '书签',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      // 当前页面书签操作按钮
+                      GestureDetector(
+                        onTap: () {
+                          if (_isCurrentPageBookmarked) {
+                            _removeBookmark();
+                          } else {
+                            _addBookmark();
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _isCurrentPageBookmarked 
+                                ? Colors.orange.withValues(alpha: 0.2)
+                                : Colors.blue.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: _isCurrentPageBookmarked 
+                                  ? Colors.orange
+                                  : Colors.blue,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isCurrentPageBookmarked 
+                                    ? Icons.bookmark_remove
+                                    : Icons.bookmark_add,
+                                color: _isCurrentPageBookmarked 
+                                    ? Colors.orange
+                                    : Colors.blue,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _isCurrentPageBookmarked 
+                                    ? '删除书签'
+                                    : '添加书签',
+                                style: TextStyle(
+                                  color: _isCurrentPageBookmarked 
+                                      ? Colors.orange
+                                      : Colors.blue,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 书签列表
+                Expanded(
+                  child: _bookmarks.isEmpty
+                      ? const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.bookmark_border,
+                                color: Colors.white38,
+                                size: 48,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                '暂无书签',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                '点击上方按钮添加当前页面为书签',
+                                style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: _bookmarks.length,
+                          itemBuilder: (context, index) {
+                            final bookmark = _bookmarks[index];
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () => _goToBookmark(bookmark.pageNumber),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.05),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.1),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: const Icon(
+                                            Icons.bookmark,
+                                            color: Colors.blue,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '第 ${bookmark.pageNumber} 页',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '创建于 ${_formatDate(bookmark.createDate)}',
+                                                style: const TextStyle(
+                                                  color: Colors.white60,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // 删除按钮
+                                        GestureDetector(
+                                          onTap: () => _deleteBookmark(bookmark.id!),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: Colors.red.withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: const Icon(
+                                              Icons.delete_outline,
+                                              color: Colors.red,
+                                              size: 18,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2495,41 +2909,246 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   }
   
   void _searchInBook(String query) {
+    List<int> searchResults = [];
+    
+    // 查找所有匹配的页面
     for (int i = 0; i < _pages.length; i++) {
       if (_pages[i].toLowerCase().contains(query.toLowerCase())) {
-        _pageController.animateToPage(
-          i,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('在第 ${i + 1} 页找到："$query"'),
-            backgroundColor: Colors.black.withValues(alpha: 0.8),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
+        searchResults.add(i);
       }
     }
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('未找到："$query"'),
-        backgroundColor: Colors.red.withValues(alpha: 0.8),
-        behavior: SnackBarBehavior.floating,
+    if (searchResults.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('未找到："$query"'),
+          backgroundColor: Colors.red.withValues(alpha: 0.8),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    // 找到第一个匹配项并跳转
+    int firstResult = searchResults.first;
+    _pageController.animateToPage(
+      firstResult,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+
+    // 显示搜索结果底部面板
+    _showSearchResultsPanel(query, searchResults, 0);
+  }
+
+  void _showSearchResultsPanel(String query, List<int> results, int currentIndex) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isDismissible: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.9),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '搜索结果：$query',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  '${currentIndex + 1}/${results.length}',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // 上一个结果
+                ElevatedButton.icon(
+                  onPressed: currentIndex > 0
+                      ? () {
+                          Navigator.pop(context);
+                          int prevIndex = currentIndex - 1;
+                          _pageController.animateToPage(
+                            results[prevIndex],
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                          );
+                          _showSearchResultsPanel(query, results, prevIndex);
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey.withValues(alpha: 0.3),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.keyboard_arrow_up),
+                  label: const Text('上一个'),
+                ),
+                // 下一个结果
+                ElevatedButton.icon(
+                  onPressed: currentIndex < results.length - 1
+                      ? () {
+                          Navigator.pop(context);
+                          int nextIndex = currentIndex + 1;
+                          _pageController.animateToPage(
+                            results[nextIndex],
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                          );
+                          _showSearchResultsPanel(query, results, nextIndex);
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.withValues(alpha: 0.3),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  label: const Text('下一个'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '第 ${results[currentIndex] + 1} 页',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
   
   void _shareCurrentPage() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildSharePanel(),
+    );
+  }
+
+  Widget _buildSharePanel() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.9),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            '分享选项',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // 分享当前页面
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.content_copy, color: Colors.blue),
+            ),
+            title: const Text('复制当前页面', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('复制当前页面内容到剪贴板', style: TextStyle(color: Colors.white70)),
+            onTap: () {
+              Navigator.pop(context);
+              _copyCurrentPage();
+            },
+          ),
+
+          // 分享阅读进度
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.timeline, color: Colors.green),
+            ),
+            title: const Text('分享阅读进度', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('分享书籍信息和阅读进度', style: TextStyle(color: Colors.white70)),
+            onTap: () {
+              Navigator.pop(context);
+              _copyReadingProgress();
+            },
+          ),
+
+          // 分享书籍摘录
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.format_quote, color: Colors.purple),
+            ),
+            title: const Text('创建书摘卡片', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('生成精美的书摘分享卡片', style: TextStyle(color: Colors.white70)),
+            onTap: () {
+              Navigator.pop(context);
+              _createBookQuoteCard();
+            },
+          ),
+
+          // 分享书籍信息
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.book, color: Colors.orange),
+            ),
+            title: const Text('分享书籍信息', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('分享书名、作者等基本信息', style: TextStyle(color: Colors.white70)),
+            onTap: () {
+              Navigator.pop(context);
+              _copyBookInfo();
+            },
+          ),
+
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  void _copyCurrentPage() {
     if (_pages.isNotEmpty && _currentPageIndex < _pages.length) {
       final currentPageContent = _pages[_currentPageIndex];
       final bookInfo = '《${widget.book.title}》- ${widget.book.author}';
       final shareText = '$bookInfo\n\n第${_currentPageIndex + 1}页:\n\n$currentPageContent';
       
-      // 复制到剪贴板
       Clipboard.setData(ClipboardData(text: shareText));
       
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2540,6 +3159,84 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         ),
       );
     }
+  }
+
+  void _copyReadingProgress() {
+    final progress = _pages.isNotEmpty ? ((_currentPageIndex + 1) / _pages.length * 100) : 0;
+    final progressText = '''📚 阅读进度分享
+
+《${widget.book.title}》
+作者：${widget.book.author}
+
+📖 阅读进度：${progress.toStringAsFixed(1)}% (第${_currentPageIndex + 1}页 / 共${_pages.length}页)
+📅 ${DateTime.now().year}年${DateTime.now().month}月${DateTime.now().day}日
+
+#读书记录 #阅读进度''';
+
+    Clipboard.setData(ClipboardData(text: progressText));
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('阅读进度已复制到剪贴板'),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _createBookQuoteCard() {
+    if (_pages.isNotEmpty && _currentPageIndex < _pages.length) {
+      String pageContent = _pages[_currentPageIndex];
+      
+      // 取前200字符作为摘录
+      String excerpt = pageContent.length > 200 
+          ? '${pageContent.substring(0, 200)}...' 
+          : pageContent;
+
+      final quoteCard = '''✨ 书摘分享
+
+"$excerpt"
+
+——《${widget.book.title}》
+   ${widget.book.author}
+
+📍 第${_currentPageIndex + 1}页
+📅 ${DateTime.now().year}.${DateTime.now().month.toString().padLeft(2, '0')}.${DateTime.now().day.toString().padLeft(2, '0')}
+
+#读书笔记 #书摘 #阅读感悟''';
+
+      Clipboard.setData(ClipboardData(text: quoteCard));
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('书摘卡片已复制到剪贴板'),
+          backgroundColor: Colors.purple,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _copyBookInfo() {
+    final bookInfoText = '''📚 书籍推荐
+
+《${widget.book.title}》
+作者：${widget.book.author}
+格式：${widget.book.filePath.split('.').last.toUpperCase()}
+
+推荐理由：这是一本值得阅读的好书！
+
+#读书推荐 #好书分享''';
+
+    Clipboard.setData(ClipboardData(text: bookInfoText));
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('书籍信息已复制到剪贴板'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 }
 
@@ -2620,8 +3317,8 @@ class _ModernToolbarButtonState extends State<_ModernToolbarButton>
           return Transform.scale(
             scale: _scaleAnimation.value,
             child: Container(
-              width: 64,
-              height: 64,
+              width: 60, // 减少宽度
+              height: 52, // 减少高度
               decoration: BoxDecoration(
                 color: _colorAnimation.value,
                 borderRadius: BorderRadius.circular(16),
@@ -2632,9 +3329,9 @@ class _ModernToolbarButtonState extends State<_ModernToolbarButton>
                   Icon(
                     widget.icon,
                     color: iconColor,
-                    size: 22,
+                    size: 20, // 减少图标大小
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4), // 减少间距
                   Text(
                     widget.label,
                     style: TextStyle(

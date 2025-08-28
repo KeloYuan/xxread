@@ -18,6 +18,18 @@ class BookDao {
       final db = await _dbService.database;
       final List<Map<String, dynamic>> maps = await db.query(
         'books',
+        columns: [
+          'id',
+          'title', 
+          'author',
+          'filePath',
+          'format',
+          'currentPage',
+          'totalPages',
+          'importDate',
+          'file_modified_time',
+          'content_hash'
+        ],
         orderBy: 'importDate DESC',
       );
       return List.generate(maps.length, (i) => Book.fromMap(maps[i]));
@@ -43,6 +55,33 @@ class BookDao {
     }
   }
 
+  Future<int> getBooksCount() async {
+    try {
+      final db = await _dbService.database;
+      final result = await db.rawQuery('SELECT COUNT(*) as count FROM books');
+      return (result.first['count'] as int?) ?? 0;
+    } catch (e) {
+      throw Exception('获取书籍数量失败: $e');
+    }
+  }
+
+  Future<Book?> getBookById(int bookId) async {
+    try {
+      final db = await _dbService.database;
+      final List<Map<String, dynamic>> maps = await db.query(
+        'books',
+        where: 'id = ?',
+        whereArgs: [bookId],
+      );
+      if (maps.isNotEmpty) {
+        return Book.fromMap(maps.first);
+      }
+      return null;
+    } catch (e) {
+      throw Exception('获取书籍详情失败: $e');
+    }
+  }
+
   Future<void> updateBookTotalPages(int bookId, int totalPages) async {
     final db = await _dbService.database;
     await db.update(
@@ -51,6 +90,23 @@ class BookDao {
       where: 'id = ?',
       whereArgs: [bookId],
     );
+  }
+
+  Future<void> updateBook(Book book) async {
+    try {
+      final db = await _dbService.database;
+      final result = await db.update(
+        'books',
+        book.toMap(),
+        where: 'id = ?',
+        whereArgs: [book.id],
+      );
+      if (result == 0) {
+        throw Exception('书籍不存在');
+      }
+    } catch (e) {
+      throw Exception('更新书籍信息失败: $e');
+    }
   }
 
   Future<void> deleteBook(int bookId) async {

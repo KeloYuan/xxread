@@ -11,7 +11,7 @@ class DatabaseService {
 
   static Database? _database;
   static const String _dbName = 'xxread_v2.db';
-  static const int _dbVersion = 4; // <-- Version incremented for notes and highlights
+  static const int _dbVersion = 5; // <-- Version incremented for content caching
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -102,6 +102,14 @@ class DatabaseService {
         ''');
       }
     }
+    if (oldVersion < 5) {
+      // Add content caching fields to books table
+      await db.execute('ALTER TABLE books ADD COLUMN cached_content TEXT');
+      await db.execute('ALTER TABLE books ADD COLUMN cached_pages TEXT');
+      await db.execute('ALTER TABLE books ADD COLUMN file_modified_time INTEGER');
+      await db.execute('ALTER TABLE books ADD COLUMN content_hash TEXT');
+      await db.execute('ALTER TABLE books ADD COLUMN table_of_contents TEXT');
+    }
   }
 
   Future<void> _createTables(Database db) async {
@@ -114,7 +122,12 @@ class DatabaseService {
         format TEXT NOT NULL,
         currentPage INTEGER DEFAULT 0,
         totalPages INTEGER DEFAULT 1,
-        importDate INTEGER NOT NULL
+        importDate INTEGER NOT NULL,
+        cached_content TEXT,
+        cached_pages TEXT,
+        file_modified_time INTEGER,
+        content_hash TEXT,
+        table_of_contents TEXT
       )
     ''');
 

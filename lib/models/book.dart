@@ -7,6 +7,12 @@ class Book {
   final int currentPage;
   final int totalPages; // 添加总页数字段
   final DateTime importDate;
+  // 缓存相关字段
+  final String? cachedContent;
+  final String? cachedPages;
+  final int? fileModifiedTime;
+  final String? contentHash;
+  final String? tableOfContents;
 
   Book({
     this.id,
@@ -17,6 +23,11 @@ class Book {
     this.currentPage = 0,
     this.totalPages = 1, // 默认总页数为1
     DateTime? importDate,
+    this.cachedContent,
+    this.cachedPages,
+    this.fileModifiedTime,
+    this.contentHash,
+    this.tableOfContents,
   }) : importDate = importDate ?? DateTime.now();
 
   // content 字段已被移除
@@ -31,6 +42,11 @@ class Book {
       'currentPage': currentPage,
       'totalPages': totalPages,
       'importDate': importDate.millisecondsSinceEpoch,
+      'cached_content': cachedContent,
+      'cached_pages': cachedPages,
+      'file_modified_time': fileModifiedTime,
+      'content_hash': contentHash,
+      'table_of_contents': tableOfContents,
     };
   }
 
@@ -44,6 +60,11 @@ class Book {
       currentPage: map['currentPage'] ?? 0,
       totalPages: map['totalPages'] ?? 1,
       importDate: DateTime.fromMillisecondsSinceEpoch(map['importDate']),
+      cachedContent: map['cached_content'],
+      cachedPages: map['cached_pages'],
+      fileModifiedTime: map['file_modified_time'],
+      contentHash: map['content_hash'],
+      tableOfContents: map['table_of_contents'],
     );
   }
 
@@ -56,6 +77,11 @@ class Book {
     int? currentPage,
     int? totalPages,
     DateTime? importDate,
+    String? cachedContent,
+    String? cachedPages,
+    int? fileModifiedTime,
+    String? contentHash,
+    String? tableOfContents,
   }) {
     return Book(
       id: id ?? this.id,
@@ -66,6 +92,11 @@ class Book {
       currentPage: currentPage ?? this.currentPage,
       totalPages: totalPages ?? this.totalPages,
       importDate: importDate ?? this.importDate,
+      cachedContent: cachedContent ?? this.cachedContent,
+      cachedPages: cachedPages ?? this.cachedPages,
+      fileModifiedTime: fileModifiedTime ?? this.fileModifiedTime,
+      contentHash: contentHash ?? this.contentHash,
+      tableOfContents: tableOfContents ?? this.tableOfContents,
     );
   }
 }

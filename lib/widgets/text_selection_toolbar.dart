@@ -54,8 +54,8 @@ class TextSelectionToolbar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _ToolbarButton(
-                  icon: Icons.highlight,
-                  label: '高亮',
+                  icon: Icons.format_underlined,
+                  label: '划线',
                   onTap: onHighlight,
                 ),
                 const SizedBox(width: 8),
@@ -143,7 +143,7 @@ class HighlightColorPicker extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '选择高亮颜色',
+              '选择划线颜色',
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 12),

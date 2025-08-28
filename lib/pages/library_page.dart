@@ -241,10 +241,16 @@ class _LibraryPageState extends State<LibraryPage> {
         return _BookCoverItem(
           book: book,
           onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => ReadingPageEnhanced(book: book)),
-            );
+            // 获取包含缓存内容的完整书籍信息
+            final fullBook = await _bookDao.getBookById(book.id!);
+            if (fullBook != null && mounted) {
+              if (context.mounted) {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ReadingPageEnhanced(book: fullBook)),
+                );
+              }
+            }
             _loadBooks();
           },
           onLongPress: () => _showBookOptions(book),
