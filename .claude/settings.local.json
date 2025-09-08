@@ -28,7 +28,13 @@
       "Bash(copy:*)",
       "Bash(git restore:*)",
       "Bash(del \"build\\windows\\x64\\runner\\Release\\xxread.exe\")",
-      "Bash(r)"
+      "Bash(r)",
+      "Bash(del nul)",
+      "Bash(wmic process:*)",
+      "Bash(timeout:*)",
+      "Bash(git checkout:*)",
+      "Bash(rd:*)",
+      "Bash(./gradlew --stop)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

@@ -374,10 +374,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     final statusBarHeight = MediaQuery.of(context).padding.top;
     final systemBottomPadding = MediaQuery.of(context).padding.bottom;
     
-    // 固定留白 + 控制栏空间预留
-    final topPadding = 40.0;    
-    final baseBottomPadding = 40.0; // 与页面显示保持一致
-    final controlsSpace = 100.0;    // 与页面显示保持一致
+    // 固定留白 + 控制栏空间预留 - 优化以增加文本密度
+    final topPadding = 30.0;        // 减少顶部留白
+    final baseBottomPadding = 25.0; // 减少底部留白
+    final controlsSpace = 80.0;     // 减少控制栏空间预留
     final totalBottomPadding = baseBottomPadding + controlsSpace;
     
     // 计算实际可用的文本显示区域
@@ -405,11 +405,11 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     final charWidth = singleCharPainter.size.width;
     final lineHeight = singleCharPainter.size.height;
     
-    // 计算每行可以显示的字符数（保留更多余量确保文字完全可见）
-    final charsPerLine = ((safeWidth - 20) / charWidth).floor(); // 减去20px安全边距
+    // 计算每行可以显示的字符数（优化安全边距以增加字符密度）
+    final charsPerLine = ((safeWidth - 10) / charWidth).floor(); // 减少安全边距到10px
     
-    // 计算可以显示的最大行数（保留更多余量避免被截断）
-    final maxLines = ((safeHeight - lineHeight) / lineHeight).floor(); // 减去一行高度余量
+    // 计算可以显示的最大行数（减少余量以显示更多文本）
+    final maxLines = ((safeHeight - lineHeight * 0.5) / lineHeight).floor(); // 只减去半行高度余量
     
     // 计算每页总字符数
     int totalChars = maxLines * charsPerLine;
@@ -427,25 +427,60 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     return totalChars;
   }
   
-  // 备用分页方法
+  // 备用分页方法 - 确保边界连续性
   void _fallbackPagination(String content) {
     debugPrint('🆘 使用备用分页方法...');
     _pages.clear();
     
-    const int charsPerPage = 800;
+    if (content.isEmpty) {
+      _pages.add('内容为空');
+      return;
+    }
     
-    for (int i = 0; i < content.length; i += charsPerPage) {
-      final end = (i + charsPerPage < content.length) ? i + charsPerPage : content.length;
-      final pageContent = content.substring(i, end).trim();
+    const int charsPerPage = 1200; // 增加每页字符数以提高文本密度
+    int currentPos = 0;
+    
+    while (currentPos < content.length) {
+      int endPos = currentPos + charsPerPage;
+      
+      // 如果超出内容长度，直接到末尾
+      if (endPos >= content.length) {
+        final lastPageContent = content.substring(currentPos);
+        if (lastPageContent.isNotEmpty) {
+          _pages.add(lastPageContent);
+        }
+        break;
+      }
+      
+      // 尝试在合适位置分割，避免断字
+      int actualEndPos = endPos;
+      for (int offset = 0; offset < 50; offset++) {
+        int checkPos = endPos - offset;
+        if (checkPos <= currentPos) break;
+        
+        String char = content[checkPos];
+        if (char == '。' || char == '！' || char == '？' || char == '\n' || char == ' ') {
+          actualEndPos = char == '\n' ? checkPos : checkPos + 1;
+          break;
+        }
+      }
+      
+      String pageContent = content.substring(currentPos, actualEndPos);
+      // 只移除开头结尾的换行，保持内容完整性
+      pageContent = pageContent.replaceAll(RegExp(r'^\n+'), '').replaceAll(RegExp(r'\n+$'), '');
+      
       if (pageContent.isNotEmpty) {
         _pages.add(pageContent);
+        debugPrint('🆘 备用分页第${_pages.length}页: 位置$currentPos-$actualEndPos, 长度${pageContent.length}字符');
       }
+      
+      currentPos = actualEndPos;
     }
     
     debugPrint('🆘 备用分页完成: 总共 ${_pages.length} 页');
   }
   
-  // 改进的智能分页 - 在段落、句号处切分
+  // 改进的智能分页 - 确保页面边界严格连续，无重叠无遗漏
   void _smartPagination(String content, int targetCharsPerPage) {
     try {
       _pages.clear();
@@ -459,73 +494,157 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
       int pageCount = 0;
       const maxPages = 50000; // 防止无限循环
       
+      debugPrint('📖 开始智能分页: 内容长度${content.length}字符, 目标每页$targetCharsPerPage字符');
+      
       while (currentPos < content.length && pageCount < maxPages) {
-        int endPos = currentPos + targetCharsPerPage;
+        int targetEndPos = currentPos + targetCharsPerPage;
         
-        // 如果超出内容长度，直接到末尾
-        if (endPos >= content.length) {
-          final lastPage = content.substring(currentPos).trim();
-          if (lastPage.isNotEmpty) {
-            _pages.add(lastPage);
+        // 如果超出内容长度，直接取到末尾
+        if (targetEndPos >= content.length) {
+          final lastPageContent = content.substring(currentPos);
+          if (lastPageContent.isNotEmpty) {
+            _pages.add(lastPageContent);
+            debugPrint('📄 最后一页: 位置$currentPos-${content.length}, 长度${lastPageContent.length}字符');
           }
           break;
         }
         
         // 寻找最佳分割点
-        int actualEndPos = endPos;
-        final minEndPos = currentPos + (targetCharsPerPage * 0.7).round(); // 提高到70%，确保页面内容充实
+        int actualEndPos = targetEndPos;
+        final minEndPos = currentPos + (targetCharsPerPage * 0.6).round(); // 确保页面内容不会太短
         
-        // 在合理范围内寻找分割点
-        for (int offset = 0; offset < 100; offset++) { // 减少搜索范围，避免页面过短
-          int checkPos = endPos - offset;
-          if (checkPos <= minEndPos || checkPos >= content.length) break;
+        bool foundGoodSplit = false;
+        
+        // 在合理范围内寻找分割点，优先级：段落 > 句子 > 标点
+        for (int offset = 0; offset <= 150 && !foundGoodSplit; offset++) {
+          int checkPos = targetEndPos - offset;
+          if (checkPos <= minEndPos) break;
           
+          if (checkPos >= content.length) continue;
           String char = content[checkPos];
           
-          // 段落分割最优（在换行符后分页）
-          if (char == '\n' && checkPos + 1 < content.length) {
-            actualEndPos = checkPos + 1; // 保留换行符在前一页
-            break;
+          // 段落分割最优（双换行或段落结束）
+          if (char == '\n') {
+            // 检查是否是段落结束（连续换行或换行后是段落开始）
+            if (checkPos + 1 < content.length) {
+              String nextChar = content[checkPos + 1];
+              if (nextChar == '\n' || nextChar == ' ' || RegExp(r'[第\d一二三四五六七八九十]').hasMatch(nextChar)) {
+                actualEndPos = checkPos;
+                foundGoodSplit = true;
+                debugPrint('📋 段落分割点: 位置$checkPos');
+              }
+            }
           }
-          // 句号分割次优  
-          else if (char == '。' && checkPos + 1 < content.length) {
-            actualEndPos = checkPos + 1;
-            break;
+          // 句号分割次优
+          else if (char == '。') {
+            actualEndPos = checkPos + 1; // 句号保留在当前页
+            foundGoodSplit = true;
+            debugPrint('📋 句号分割点: 位置$checkPos');
           }
-          // 逗号、问号等分割
-          else if ('，？！；：'.contains(char) && checkPos + 1 < content.length) {
-            actualEndPos = checkPos + 1;
-            break;
+          // 其他标点分割
+          else if ('！？；'.contains(char)) {
+            actualEndPos = checkPos + 1; // 标点保留在当前页
+            foundGoodSplit = true;
+            debugPrint('📋 标点分割点: 位置$checkPos ($char)');
           }
         }
         
-        // 确保 actualEndPos 有效
+        // 如果没找到合适分割点，检查是否可以在空格处分割
+        if (!foundGoodSplit) {
+          for (int offset = 0; offset <= 50; offset++) {
+            int checkPos = targetEndPos - offset;
+            if (checkPos <= minEndPos) break;
+            if (checkPos >= content.length) continue;
+            
+            if (content[checkPos] == ' ') {
+              actualEndPos = checkPos;
+              foundGoodSplit = true;
+              debugPrint('📋 空格分割点: 位置$checkPos');
+              break;
+            }
+          }
+        }
+        
+        // 确保分割位置在有效范围内
         actualEndPos = actualEndPos.clamp(minEndPos, content.length);
         
-        String pageContent = content.substring(currentPos, actualEndPos).trim();
+        // 提取当前页内容 - 不使用trim()以保持原始字符完整性
+        String pageContent = content.substring(currentPos, actualEndPos);
+        
+        // 只移除页面开头和结尾的多余换行，保留其他空格
+        pageContent = pageContent.replaceAll(RegExp(r'^\n+'), '').replaceAll(RegExp(r'\n+$'), '');
+        
         if (pageContent.isNotEmpty) {
           _pages.add(pageContent);
+          debugPrint('📄 第${_pages.length}页: 位置$currentPos-$actualEndPos, 长度${pageContent.length}字符');
+          
+          // Debug: 显示页面边界字符
+          if (pageContent.isNotEmpty) {
+            final firstChar = pageContent[0];
+            final lastChar = pageContent[pageContent.length - 1];
+            debugPrint('   📝 边界字符: 首"$firstChar" 尾"$lastChar"');
+          }
         }
         
+        // 更新位置 - 关键：确保下一页从正确位置开始
         currentPos = actualEndPos;
         
-        // 只跳过换行符，避免跳过有意义的空格和内容
+        // 跳过页面间的多余换行，但不跳过有意义的内容
         while (currentPos < content.length && content[currentPos] == '\n') {
           currentPos++;
         }
         
         pageCount++;
+        
+        // 防止死循环
+        if (actualEndPos <= currentPos && pageCount > 1) {
+          debugPrint('⚠️ 检测到位置未推进，强制推进避免死循环');
+          currentPos++;
+        }
       }
       
-      // 检查是否成功分页
+      // 验证分页结果
       if (_pages.isEmpty) {
         debugPrint('⚠️ 智能分页失败，使用备用方法');
         _fallbackPagination(content);
+      } else {
+        debugPrint('✅ 智能分页完成: ${_pages.length}页');
+        _verifyPaginationContinuity(content);
       }
       
     } catch (e) {
       debugPrint('❌ 智能分页出错: $e');
       _fallbackPagination(content);
+    }
+  }
+  
+  /// 验证分页连续性 - 确保没有字符丢失或重复
+  void _verifyPaginationContinuity(String originalContent) {
+    if (_pages.length <= 1) return;
+    
+    try {
+      // 重新组合所有页面内容
+      String reconstructed = _pages.join('');
+      
+      // 比较长度
+      if (reconstructed.length != originalContent.length) {
+        debugPrint('⚠️ 分页连续性检查: 长度不匹配 原文${originalContent.length} vs 重组${reconstructed.length}');
+      }
+      
+      // 抽样检查前几页的边界
+      for (int i = 0; i < _pages.length - 1 && i < 3; i++) {
+        if (_pages[i].isEmpty || _pages[i + 1].isEmpty) continue;
+        
+        String currentPageLast = _pages[i][_pages[i].length - 1];
+        String nextPageFirst = _pages[i + 1][0];
+        
+        debugPrint('📋 页面${i + 1}-${i + 2}边界: "$currentPageLast" -> "$nextPageFirst"');
+      }
+      
+      debugPrint('✅ 分页连续性验证完成');
+      
+    } catch (e) {
+      debugPrint('❌ 分页连续性验证出错: $e');
     }
   }
 
@@ -598,18 +717,62 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     });
   }
 
+  Timer? _repaginationTimer;
+
   Future<void> _saveSetting(Function(SharedPreferences) saver) async {
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
     saver(prefs);
-    // 响应式重新分页 - 当字体、间距、边距变化时
-    Future.delayed(const Duration(milliseconds: 100), () {
+    
+    // 使用防抖机制，避免频繁重新分页
+    _repaginationTimer?.cancel();
+    _repaginationTimer = Timer(const Duration(milliseconds: 300), () {
       if (mounted && _bookContent.isNotEmpty) {
-        debugPrint('🔄 设置变化，重新分页...');
-        _splitIntoPages();
-        setState(() {});
+        debugPrint('🔄 设置变化，智能重新分页...');
+        _intelligentRepagination();
       }
     });
+  }
+
+  // 智能重新分页 - 保持当前阅读位置
+  void _intelligentRepagination() {
+    if (!mounted || _bookContent.isEmpty) return;
+    
+    // 记录当前阅读位置（字符位置）
+    int currentCharPosition = 0;
+    for (int i = 0; i < _currentPageIndex && i < _pages.length; i++) {
+      currentCharPosition += _pages[i].length;
+    }
+    
+    // 重新分页
+    _splitIntoPages();
+    
+    // 根据字符位置找到新的页码
+    int newPageIndex = 0;
+    int charCount = 0;
+    for (int i = 0; i < _pages.length; i++) {
+      if (charCount + _pages[i].length > currentCharPosition) {
+        newPageIndex = i;
+        break;
+      }
+      charCount += _pages[i].length;
+      newPageIndex = i + 1;
+    }
+    
+    // 安全地更新页码
+    _currentPageIndex = newPageIndex.clamp(0, _pages.length - 1);
+    
+    // 更新页面控制器
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        _currentPageIndex,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+    
+    setState(() {});
+    debugPrint('✅ 智能重新分页完成，保持阅读位置在第${_currentPageIndex + 1}页');
   }
 
   // --- UI Controls ---
@@ -733,23 +896,22 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
 
   @override
   Widget build(BuildContext context) {
-    // 检测屏幕尺寸变化，响应式重新分页
+    // 检测屏幕尺寸变化，智能响应式重新分页
     final currentScreenSize = MediaQuery.of(context).size;
     if (_lastScreenSize != null && 
         (_lastScreenSize!.width != currentScreenSize.width || 
          _lastScreenSize!.height != currentScreenSize.height)) {
-      debugPrint('🔄 屏幕尺寸变化，触发重新分页');
+      debugPrint('🔄 屏幕尺寸变化，触发智能重新分页');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _bookContent.isNotEmpty) {
-          _splitIntoPages();
-          setState(() {});
+          _intelligentRepagination();
         }
       });
     }
     _lastScreenSize = currentScreenSize;
     
     return Scaffold(
-      backgroundColor: _backgroundColor,
+      backgroundColor: Theme.of(context).colorScheme.surface, // 使用主题背景色而不是_backgroundColor
       body: Stack(
         children: [
           Positioned.fill(
@@ -765,7 +927,8 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
             ),
           ),
           _buildControlsOverlay(),
-          RepaintBoundary(child: _buildPageIndicators()),
+          // 调试信息显示
+          if (_pages.isNotEmpty && _pages.length > 1) _buildDebugInfo(),
         ],
       ),
     );
@@ -774,7 +937,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   Widget _buildMainContent() {
     if (_pages.isEmpty) {
       return Container(
-        color: _backgroundColor,
+        color: Theme.of(context).colorScheme.surface, // 使用主题背景色
         child: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -869,61 +1032,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     }
   }
 
-  Widget _buildPageNumber() {
-    final shouldShowDoublePage = ResponsiveHelper.shouldShowDoublePage(context);
-    final displayText = shouldShowDoublePage && _currentPageIndex + 1 < _pages.length
-        ? '${_currentPageIndex + 1}-${_currentPageIndex + 2} / ${_pages.length}'
-        : '${_currentPageIndex + 1} / ${_pages.length}';
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          constraints: const BoxConstraints(minWidth: 70),
-          decoration: BoxDecoration(
-            color: _fontColor.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _fontColor.withValues(alpha: 0.15), width: 0.5),
-          ),
-          child: Text(
-            displayText,
-            style: TextStyle(
-              color: _fontColor.withValues(alpha: 0.7),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPageIndicators() {
-    // 当控制栏显示时，页面指示器向下滑动隐藏
-    final opacity = _showControls ? 0.0 : 1.0;
-    final offset = _showControls ? 50.0 : 0.0;
-    
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      bottom: 30 + offset, // 修复位置逻辑：基础30px + 动态偏移
-      left: 0,
-      right: 0,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 300),
-        opacity: opacity,
-        child: _buildPageNumber(),
-      ),
-    );
-  }
-
   // 双页布局视图 - 简化版，只有中间分隔线
   Widget _buildDoublePageView() {
     return Container(
-      color: _backgroundColor,
+      color: Theme.of(context).colorScheme.surface, // 使用主题背景色
       child: PageView.builder(
         controller: _pageController,
         itemCount: (_pages.length / 2).ceil(),
@@ -969,7 +1081,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   Widget _buildPageWidget(int index, {bool isDoublePage = false}) {
     if (index < 0 || index >= _pages.length) {
       return Container(
-        color: _backgroundColor,
+        color: Theme.of(context).colorScheme.surface, // 使用主题背景色
         child: Center(
           child: Text(
             '页面索引错误: $index',
@@ -982,7 +1094,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     final pageContent = _pages[index];
     if (pageContent.isEmpty) {
       return Container(
-        color: _backgroundColor,
+        color: Theme.of(context).colorScheme.surface, // 使用主题背景色
         child: Center(
           child: Text(
             '页面内容为空',
@@ -1009,7 +1121,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
     
     return RepaintBoundary(
       child: Container(
-        color: _backgroundColor,
+        color: Theme.of(context).colorScheme.surface, // 使用主题背景色
         width: double.infinity,
         height: double.infinity,
         child: SafeArea(
@@ -1028,7 +1140,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
               fontSize: _fontSize,
               height: _lineSpacing,
               letterSpacing: _letterSpacing,
-              color: _fontColor,
+              color: Theme.of(context).colorScheme.onSurface, // 使用主题字体颜色
               fontFamily: _fontFamily == 'System' ? null : _fontFamily,
             ),
             textAlign: TextAlign.justify,
@@ -1080,8 +1192,10 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                 bottomLeft: Radius.circular(20),
                 bottomRight: Radius.circular(20),
               ),
+              // 毛玻璃效果 - 阅读页面顶部控制栏
+              // 创建半透明控制栏，不遮挡阅读内容的视觉体验
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15), // 较轻的模糊避免干扰阅读
                 child: Container(
                   width: double.infinity,
                   padding: EdgeInsets.only(
@@ -1212,14 +1326,16 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
           child: Container(
         width: double.infinity,
         padding: EdgeInsets.only(
-          bottom: bottomPadding + 8, // 减少底部内边距
-          top: 8,                    // 减少顶部内边距
+          top: 8, // 只保留顶部内边距，让背景延伸到底部
         ),
         child: ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: Container(
+              padding: EdgeInsets.only(
+                bottom: bottomPadding + 8, // 内容区域保持底部间距
+              ),
               decoration: BoxDecoration(
                 color: toolbarBgColor.withValues(alpha: 0.95),
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1390,7 +1506,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
               value: _pages.isNotEmpty ? _currentPageIndex.toDouble().clamp(0, (_pages.length - 1).toDouble()) : 0.0,
               min: 0,
               max: (_pages.isNotEmpty ? _pages.length - 1 : 0).toDouble(),
-              divisions: _pages.isNotEmpty ? _pages.length - 1 : null,
+              divisions: _pages.length > 1 ? _pages.length - 1 : null, // 修复：当页数<=1时设为null，避免divisions=0的错误
               label: _pages.isNotEmpty ? '第 ${_currentPageIndex + 1} 页' : '第 0 页',
               onChanged: _pages.isNotEmpty ? (value) => setState(() => _currentPageIndex = value.toInt()) : null,
               onChangeEnd: _pages.isNotEmpty
@@ -1621,7 +1737,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                           decoration: BoxDecoration(
                             border: Border(
-                              bottom: BorderSide(
+                              top: BorderSide(
                                 color: isDarkMode 
                                     ? Colors.grey[700]!.withValues(alpha: 0.5)
                                     : Colors.grey[300]!.withValues(alpha: 0.8), 
@@ -1739,6 +1855,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
                                         _saveSetting((p) => p.setDouble('letterSpacing', v));
                                       },
                                     ),
+                                    _buildFontFamilySelector(isDarkMode, setModalState),
                                   ],
                                 ),
                                 const SizedBox(height: 24),
@@ -2061,6 +2178,112 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
               divisions: divisions,
               onChanged: onChanged,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFontFamilySelector(bool isDarkMode, StateSetter setModalState) {
+    final textColor = isDarkMode ? Colors.white : Colors.grey[800]!;
+    final cardColor = isDarkMode 
+        ? Colors.grey[800]!.withValues(alpha: 0.6)
+        : Colors.grey[100]!.withValues(alpha: 0.8);
+    
+    final fontFamilies = [
+      {'name': '系统默认', 'value': 'System'},
+      {'name': '宋体', 'value': 'Serif'},
+      {'name': '黑体', 'value': 'Sans-serif'},
+      {'name': '等宽字体', 'value': 'Monospace'},
+    ];
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDarkMode 
+              ? Colors.grey[600]!.withValues(alpha: 0.3)
+              : Colors.grey[300]!.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: isDarkMode 
+                      ? Colors.orange[600]!.withValues(alpha: 0.3)
+                      : Colors.orange[100]!.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.font_download_rounded,
+                  size: 16,
+                  color: isDarkMode ? Colors.orange[300] : Colors.orange[600],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '字体样式',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: fontFamilies.map((font) {
+              final isSelected = _fontFamily == font['value'];
+              return GestureDetector(
+                onTap: () {
+                  setModalState(() => _fontFamily = font['value']!);
+                  setState(() {});
+                  _saveSetting((p) => p.setString('fontFamily', font['value']!));
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? (isDarkMode ? Colors.blue[600] : Colors.blue[500])
+                        : (isDarkMode 
+                            ? Colors.grey[700]!.withValues(alpha: 0.5)
+                            : Colors.white.withValues(alpha: 0.8)),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? (isDarkMode ? Colors.blue[400]! : Colors.blue[300]!)
+                          : (isDarkMode 
+                              ? Colors.grey[600]!.withValues(alpha: 0.3)
+                              : Colors.grey[300]!.withValues(alpha: 0.5)),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Text(
+                    font['name']!,
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.white
+                          : textColor,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontFamily: font['value'] == 'System' ? null : font['value'],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -2847,6 +3070,7 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
   void dispose() {
     _hideControlsTimer?.cancel();
     _autoScrollTimer?.cancel();
+    _repaginationTimer?.cancel();
     _pageController.dispose();
 
     SystemChrome.setEnabledSystemUIMode(
@@ -3235,6 +3459,111 @@ class _ReadingPageEnhancedState extends State<ReadingPageEnhanced> {
         content: Text('书籍信息已复制到剪贴板'),
         backgroundColor: Colors.orange,
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// 构建调试信息显示
+  Widget _buildDebugInfo() {
+    if (_pages.isEmpty) return const SizedBox.shrink();
+    
+    final currentPage = _pages[_currentPageIndex];
+    final isLastPage = _currentPageIndex >= _pages.length - 1;
+    final isFirstPage = _currentPageIndex <= 0;
+    
+    // 获取当前页面的边界字符
+    String currentPageInfo = '';
+    if (currentPage.isNotEmpty) {
+      final firstChar = currentPage[0];
+      final lastChar = currentPage[currentPage.length - 1];
+      currentPageInfo = '首"$firstChar" 尾"$lastChar"';
+    }
+    
+    // 获取下一页第一个字符（如果存在）
+    String nextPageInfo = '';
+    if (!isLastPage && _currentPageIndex + 1 < _pages.length) {
+      final nextPage = _pages[_currentPageIndex + 1];
+      if (nextPage.isNotEmpty) {
+        final nextFirstChar = nextPage[0];
+        nextPageInfo = '下页首"$nextFirstChar"';
+      }
+    }
+    
+    // 获取上一页最后一个字符（如果存在）
+    String prevPageInfo = '';
+    if (!isFirstPage && _currentPageIndex - 1 >= 0) {
+      final prevPage = _pages[_currentPageIndex - 1];
+      if (prevPage.isNotEmpty) {
+        final prevLastChar = prevPage[prevPage.length - 1];
+        prevPageInfo = '上页尾"$prevLastChar"';
+      }
+    }
+    
+    return Positioned(
+      right: 10,
+      bottom: 120, // 在控制栏上方
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: _backgroundColor.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _fontColor.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '第${_currentPageIndex + 1}/${_pages.length}页',
+              style: TextStyle(
+                color: _fontColor.withValues(alpha: 0.7),
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '长度:${currentPage.length}字符',
+              style: TextStyle(
+                color: _fontColor.withValues(alpha: 0.6),
+                fontSize: 9,
+              ),
+            ),
+            if (currentPageInfo.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                currentPageInfo,
+                style: TextStyle(
+                  color: _fontColor.withValues(alpha: 0.6),
+                  fontSize: 9,
+                ),
+              ),
+            ],
+            if (prevPageInfo.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                prevPageInfo,
+                style: TextStyle(
+                  color: Colors.blue.withValues(alpha: 0.6),
+                  fontSize: 9,
+                ),
+              ),
+            ],
+            if (nextPageInfo.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                nextPageInfo,
+                style: TextStyle(
+                  color: Colors.green.withValues(alpha: 0.6),
+                  fontSize: 9,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

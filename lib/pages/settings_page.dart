@@ -14,22 +14,10 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  double _fontSize = 18.0;
-  double _lineSpacing = 1.8;
-  double _letterSpacing = 0.2;
-  double _pageMargin = 16.0;
   bool _enableAnimations = true;
   bool _enableAutoSave = true;
   bool _keepScreenOn = false;
-  String _fontFamily = 'System';
   int _autoSaveInterval = 30;
-
-  final List<String> _fontFamilies = [
-    'System',
-    'Serif',
-    'Sans-serif',
-    'Monospace',
-  ];
 
   @override
   void initState() {
@@ -40,28 +28,18 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      _fontSize = prefs.getDouble('fontSize') ?? 18.0;
-      _lineSpacing = prefs.getDouble('lineSpacing') ?? 1.8;
-      _letterSpacing = prefs.getDouble('letterSpacing') ?? 0.2;
-      _pageMargin = prefs.getDouble('pageMargin') ?? 16.0;
       _enableAnimations = prefs.getBool('enableAnimations') ?? true;
       _enableAutoSave = prefs.getBool('enableAutoSave') ?? true;
       _keepScreenOn = prefs.getBool('keepScreenOn') ?? false;
-      _fontFamily = prefs.getString('fontFamily') ?? 'System';
       _autoSaveInterval = prefs.getInt('autoSaveInterval') ?? 30;
     });
   }
 
   Future<void> _saveSettings() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('fontSize', _fontSize);
-    await prefs.setDouble('lineSpacing', _lineSpacing);
-    await prefs.setDouble('letterSpacing', _letterSpacing);
-    await prefs.setDouble('pageMargin', _pageMargin);
     await prefs.setBool('enableAnimations', _enableAnimations);
     await prefs.setBool('enableAutoSave', _enableAutoSave);
     await prefs.setBool('keepScreenOn', _keepScreenOn);
-    await prefs.setString('fontFamily', _fontFamily);
     await prefs.setInt('autoSaveInterval', _autoSaveInterval);
   }
 
@@ -125,50 +103,48 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 20),
               _buildSectionCard(
-                title: '阅读设置',
-                icon: Icons.auto_stories_outlined,
+                title: '阅读提示',
+                icon: Icons.info_outline,
                 children: [
-                  _buildSliderSetting(
-                    title: '字体大小',
-                    subtitle: '${_fontSize.round()} pt',
-                    value: _fontSize,
-                    min: 12.0,
-                    max: 32.0,
-                    divisions: 20,
-                    onChanged: (value) => setState(() => _fontSize = value),
-                    icon: Icons.format_size,
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.font_download_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 32,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '字体设置已移至阅读界面',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '打开任意书籍，点击屏幕中央，在底部控制栏中点击"设置"按钮，即可调整字体大小、行间距、字符间距、页面边距等阅读设置。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  _buildSliderSetting(
-                    title: '行间距',
-                    subtitle: _lineSpacing.toStringAsFixed(1),
-                    value: _lineSpacing,
-                    min: 1.0,
-                    max: 3.0,
-                    divisions: 20,
-                    onChanged: (value) => setState(() => _lineSpacing = value),
-                    icon: Icons.format_line_spacing,
-                  ),
-                  _buildSliderSetting(
-                    title: '字符间距',
-                    subtitle: _letterSpacing.toStringAsFixed(1),
-                    value: _letterSpacing,
-                    min: 0.0,
-                    max: 2.0,
-                    divisions: 20,
-                    onChanged: (value) => setState(() => _letterSpacing = value),
-                    icon: Icons.text_fields,
-                  ),
-                  _buildSliderSetting(
-                    title: '页面边距',
-                    subtitle: '${_pageMargin.round()} px',
-                    value: _pageMargin,
-                    min: 8.0,
-                    max: 32.0,
-                    divisions: 24,
-                    onChanged: (value) => setState(() => _pageMargin = value),
-                    icon: Icons.format_indent_increase,
-                  ),
-                  _buildFontFamilySelector(),
                 ],
               ),
               const SizedBox(height: 20),
@@ -344,167 +320,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildSliderSetting({
-    required String title,
-    required String subtitle,
-    required double value,
-    required double min,
-    required double max,
-    required int divisions,
-    required Function(double) onChanged,
-    required IconData icon,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.tertiary.withOpacityValues(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(
-                  icon,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.tertiary,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 4,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-              activeTrackColor: Theme.of(context).colorScheme.primary,
-              inactiveTrackColor: Theme.of(context).colorScheme.outline.withOpacityValues(0.3),
-              thumbColor: Theme.of(context).colorScheme.primary,
-              overlayColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.2),
-            ),
-            child: Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: divisions,
-              onChanged: onChanged,
-              onChangeEnd: (value) => _saveSettings(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFontFamilySelector() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.secondary.withOpacityValues(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(
-                  Icons.font_download,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '字体样式',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      _fontFamily,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: _fontFamilies.map((font) {
-              final isSelected = _fontFamily == font;
-              return GestureDetector(
-                onTap: () {
-                  setState(() => _fontFamily = font);
-                  _saveSettings();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.outline.withOpacityValues(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.outline.withOpacityValues(0.3),
-                    ),
-                  ),
-                  child: Text(
-                    font,
-                    style: TextStyle(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.onPrimary
-                          : Theme.of(context).colorScheme.onSurface,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildAboutCard() {
     return ClipRRect(

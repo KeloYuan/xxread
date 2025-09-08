@@ -44,10 +44,16 @@ dependencies:
   # EPUB 支持
   epubx: ^4.0.0
   
+  # PDF 支持
+  pdfx: ^2.6.0
+  
+  # 更多格式支持
+  archive: ^3.4.10  # 用于解压缩某些电子书格式
+  
   # UI 增强
   fl_chart: ^1.0.0
   page_flip: ^0.2.0
-  volume_controller: ^2.0.7
+  volume_controller: ^2.0.8  # 使用更新的版本
   provider: ^6.1.5
   sqflite_common_ffi: ^2.3.6
   path_provider: ^2.1.5
@@ -111,10 +117,9 @@ flutter:
 
 # Flutter应用图标配置
 flutter_launcher_icons:
-  android: true
+  android: "launcher_icon"
   ios: true
   image_path: "assets/images/app_icon.png"
-  min_sdk_android: 21
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/images/app_icon.png"
 

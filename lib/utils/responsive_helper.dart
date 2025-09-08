@@ -100,8 +100,8 @@ class ResponsiveHelper {
     return getValue(
       context,
       mobile: 0.7,
-      tablet: 0.8,
-      desktop: 0.9,
+      tablet: 0.75,  // 平板稍微调高，适应更多列数
+      desktop: 0.8,  // 桌面也相应调整
     );
   }
   
@@ -110,8 +110,8 @@ class ResponsiveHelper {
     return getValue(
       context,
       mobile: 2,
-      tablet: 3,
-      desktop: 4,
+      tablet: 4,    // 平板增加到4列，更好利用空间
+      desktop: 5,   // 桌面增加到5列
     );
   }
   

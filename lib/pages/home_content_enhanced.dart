@@ -4,6 +4,7 @@ import 'dart:ui';
 import '../services/book_dao.dart';
 import '../services/reading_stats_dao.dart';
 import '../utils/color_extensions.dart';
+import 'detailed_stats_page.dart';
 
 class HomeContentEnhanced extends StatefulWidget {
   const HomeContentEnhanced({super.key});
@@ -47,6 +48,16 @@ class _HomeContentEnhancedState extends State<HomeContentEnhanced> {
       // 错误处理 - 静默处理，不影响用户体验
       debugPrint('Error loading stats: $e');
     }
+  }
+
+  // 导航到详细统计页面
+  void _navigateToDetailedStats(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const DetailedStatsPage(),
+      ),
+    );
   }
 
   @override
@@ -244,17 +255,45 @@ class _HomeContentEnhancedState extends State<HomeContentEnhanced> {
       children: [
         Row(
           children: [
-            Expanded(child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)),
+            Expanded(child: _StatCard(
+              title: '今日阅读', 
+              value: '$todayMinutes', 
+              unit: '分钟', 
+              icon: Icons.today, 
+              color: Colors.blue,
+              onTap: () => _navigateToDetailedStats(context), // 跳转到详细统计
+            )),
             const SizedBox(width: 12),
-            Expanded(child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)),
+            Expanded(child: _StatCard(
+              title: '本周阅读', 
+              value: '$weekMinutes', 
+              unit: '分钟', 
+              icon: Icons.calendar_view_week, 
+              color: Colors.orange,
+              onTap: () => _navigateToDetailedStats(context),
+            )),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)),
+            Expanded(child: _StatCard(
+              title: '累计阅读', 
+              value: '$totalMinutes', 
+              unit: '分钟', 
+              icon: Icons.history, 
+              color: Colors.green,
+              onTap: () => _navigateToDetailedStats(context),
+            )),
             const SizedBox(width: 12),
-            Expanded(child: _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple)),
+            Expanded(child: _StatCard(
+              title: '书架藏书', 
+              value: '$_bookCount', 
+              unit: '本', 
+              icon: Icons.book, 
+              color: Colors.purple,
+              onTap: () => _navigateToDetailedStats(context),
+            )),
           ],
         ),
       ],
@@ -270,10 +309,38 @@ class _HomeContentEnhancedState extends State<HomeContentEnhanced> {
       mainAxisSpacing: 16,
       childAspectRatio: 1.4,
       children: [
-        _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue),
-        _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange),
-        _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green),
-        _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple),
+        _StatCard(
+          title: '今日阅读', 
+          value: '$todayMinutes', 
+          unit: '分钟', 
+          icon: Icons.today, 
+          color: Colors.blue,
+          onTap: () => _navigateToDetailedStats(context),
+        ),
+        _StatCard(
+          title: '本周阅读', 
+          value: '$weekMinutes', 
+          unit: '分钟', 
+          icon: Icons.calendar_view_week, 
+          color: Colors.orange,
+          onTap: () => _navigateToDetailedStats(context),
+        ),
+        _StatCard(
+          title: '累计阅读', 
+          value: '$totalMinutes', 
+          unit: '分钟', 
+          icon: Icons.history, 
+          color: Colors.green,
+          onTap: () => _navigateToDetailedStats(context),
+        ),
+        _StatCard(
+          title: '书架藏书', 
+          value: '$_bookCount', 
+          unit: '本', 
+          icon: Icons.book, 
+          color: Colors.purple,
+          onTap: () => _navigateToDetailedStats(context),
+        ),
       ],
     );
   }
@@ -569,12 +636,22 @@ class _StatCard extends StatelessWidget {
   final String unit;
   final IconData icon;
   final Color color;
+  final VoidCallback? onTap; // 新增点击回调
 
-  const _StatCard({required this.title, required this.value, required this.unit, required this.icon, required this.color});
+  const _StatCard({
+    required this.title, 
+    required this.value, 
+    required this.unit, 
+    required this.icon, 
+    required this.color,
+    this.onTap, // 可选的点击事件
+  });
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
+    return GestureDetector(
+      onTap: onTap, // 添加点击事件
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
@@ -651,6 +728,7 @@ class _StatCard extends StatelessWidget {
           ),
         ),
       ),
+      ), // GestureDetector
     );
   }
 }

@@ -16,6 +16,16 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Configure Java version for all subprojects
+subprojects {
+    plugins.withType<JavaPlugin> {
+        configure<JavaPluginExtension> {
+            sourceCompatibility = JavaVersion.VERSION_11
+            targetCompatibility = JavaVersion.VERSION_11
+        }
+    }
+}
+
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }

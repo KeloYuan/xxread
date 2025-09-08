@@ -8,7 +8,9 @@ import 'home_content_enhanced.dart';
 import 'library_page.dart';
 import 'settings_page.dart';
 import 'import_book_page.dart';
+import 'detailed_stats_page.dart';
 import '../utils/responsive_helper.dart';
+import '../utils/glass_config.dart';
 import '../utils/color_extensions.dart';
 import '../services/book_dao.dart';
 import '../services/reading_stats_dao.dart';
@@ -23,6 +25,7 @@ class HomePageResponsive extends StatefulWidget {
 
 class _HomePageResponsiveState extends State<HomePageResponsive> {
   int _selectedIndex = 0;
+  late PageController _pageController;
 
   final List<NavigationItem> _navigationItems = [
     NavigationItem(
@@ -44,6 +47,18 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
       page: const SettingsPage(),
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +93,12 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                 child: Container(
-                  width: ResponsiveHelper.isDesktop(context) ? 250 : 80,
+                  width: ResponsiveHelper.getValue(
+                    context,
+                    mobile: 80,     // 不会用到，但保持一致性
+                    tablet: 200,    // 平板使用中等宽度
+                    desktop: 250,   // 桌面使用最大宽度
+                  ),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
                     border: Border(
@@ -95,10 +115,28 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
                         _selectedIndex = index;
                       });
                     },
-                    extended: ResponsiveHelper.isDesktop(context),
-                    labelType: ResponsiveHelper.isDesktop(context) 
-                        ? NavigationRailLabelType.none
-                        : NavigationRailLabelType.selected,
+                    extended: ResponsiveHelper.getValue(
+                      context,
+                      mobile: false,
+                      tablet: true,    // 平板显示扩展导航，方便使用
+                      desktop: true,   // 桌面也显示扩展导航
+                    ),
+                    labelType: ResponsiveHelper.getValue(
+                      context,
+                      mobile: NavigationRailLabelType.all,
+                      tablet: NavigationRailLabelType.none,  // 平板使用扩展模式，不需要额外标签
+                      desktop: NavigationRailLabelType.none, // 桌面同样
+                    ),
+                    leading: ResponsiveHelper.isWideScreen(context) 
+                        ? _buildNavigationHeader() 
+                        : null,
+                    minWidth: 60,
+                    minExtendedWidth: ResponsiveHelper.getValue(
+                      context,
+                      mobile: 200,
+                      tablet: 200,
+                      desktop: 250,
+                    ),
                     backgroundColor: Colors.transparent,
                     indicatorColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.2),
                     selectedIconTheme: IconThemeData(
@@ -110,6 +148,10 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
                     selectedLabelTextStyle: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w600,
+                    ),
+                    unselectedLabelTextStyle: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
+                      fontWeight: FontWeight.w500,
                     ),
                     destinations: _navigationItems.map((item) => 
                       NavigationRailDestination(
@@ -158,117 +200,144 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
   // 手机端：底部导航栏
   Widget _buildBottomNavigation() {
     return Scaffold(
+      extendBody: true, // 让body延伸到底部导航栏后面
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text(
-          _navigationItems[_selectedIndex].label,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
+        // 使用与书库页面完全相同的设置 - 完全透明且高度为0
         backgroundColor: Colors.transparent,
         elevation: 0,
-        flexibleSpace: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        toolbarHeight: 0, // 设置高度为0，让毛玻璃标题栏在body中实现
+      ),
+      body: Stack(
+        children: [
+          // 主内容 - 使用PageView添加滑动动画
+          PageView(
+            controller: _pageController,
+            onPageChanged: (index) {
+              setState(() => _selectedIndex = index);
+            },
+            children: _navigationItems.map((item) => _buildPageWrapper(item.page)).toList(),
+          ),
+          // 悬浮药丸导航栏
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
             child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                    width: 0.5,
+              height: 120 + MediaQuery.of(context).padding.bottom, // 动态高度适配底部安全区域
+              color: Colors.transparent, // 完全透明，让内容透过
+              child: Center(
+                child: Container(
+                  margin: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 25), // 动态适配底部安全区域
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(35),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: GlassEffectConfig.navigationBarBlur, 
+                        sigmaY: GlassEffectConfig.navigationBarBlur,
+                      ),
+                      child: Container(
+                        height: 75, // 从70增加到75
+                        padding: const EdgeInsets.symmetric(horizontal: 36), // 从32增加到36
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface.withOpacityValues(
+                            GlassEffectConfig.navigationBarOpacity
+                          ),
+                          borderRadius: BorderRadius.circular(37.5), // 匹配新的高度
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outline.withOpacityValues(0.15),
+                            width: 0.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacityValues(0.08),
+                              blurRadius: 24,
+                              offset: const Offset(0, 6),
+                              spreadRadius: 0,
+                            ),
+                            BoxShadow(
+                              color: Colors.black.withOpacityValues(0.04),
+                              blurRadius: 48,
+                              offset: const Offset(0, 12),
+                              spreadRadius: 0,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: _navigationItems.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final item = entry.value;
+                            final isSelected = _selectedIndex == index;
+                            
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() => _selectedIndex = index);
+                                _pageController.animateToPage(
+                                  index,
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeInOut,
+                                );
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8), // 从18,6增加到20,8
+                                margin: const EdgeInsets.symmetric(horizontal: 5), // 从4增加到5
+                                decoration: BoxDecoration(
+                                  color: isSelected 
+                                    ? Theme.of(context).colorScheme.primary.withOpacityValues(0.15)
+                                    : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(24), // 从22增加到24
+                                ),
+                                child: IntrinsicHeight(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        isSelected ? item.selectedIcon : item.icon,
+                                        color: isSelected 
+                                          ? Theme.of(context).colorScheme.primary
+                                          : Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
+                                        size: 24, // 从22增加到24
+                                      ),
+                                      const SizedBox(height: 4), // 从3增加到4
+                                      Flexible(
+                                        child: Text(
+                                          item.label,
+                                          style: TextStyle(
+                                            fontSize: 12, // 从11增加到12
+                                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                            color: isSelected 
+                                              ? Theme.of(context).colorScheme.primary
+                                              : Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.1),
-              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.1),
-            ],
-          ),
-        ),
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: _navigationItems.map((item) => _buildPageWrapper(item.page)).toList(),
-        ),
-      ),
-      bottomNavigationBar: ClipRRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
-              border: Border(
-                top: BorderSide(
-                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                  width: 0.5,
-                ),
-              ),
-            ),
-            child: NavigationBar(
-              selectedIndex: _selectedIndex,
-              onDestinationSelected: (index) {
-                setState(() {
-                  _selectedIndex = index;
-                });
-              },
-              backgroundColor: Colors.transparent,
-              indicatorColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.2),
-              surfaceTintColor: Colors.transparent,
-              shadowColor: Colors.transparent,
-              elevation: 0,
-              destinations: _navigationItems.map((item) => 
-                NavigationDestination(
-                  icon: Icon(item.icon),
-                  selectedIcon: Icon(item.selectedIcon),
-                  label: item.label,
-                ),
-              ).toList(),
-            ),
-          ),
-        ),
-      ),
-      floatingActionButton: _selectedIndex < 2 ? Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Theme.of(context).colorScheme.primary.withOpacityValues(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: FloatingActionButton.extended(
-              onPressed: () => _navigateToImport(),
-              backgroundColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.9),
-              icon: const Icon(Icons.add),
-              label: const Text('导入书籍'),
-            ),
-          ),
-        ),
-      ) : null,
     );
   }
 
   Widget _buildPageWrapper(Widget page) {
-    // 对于手机端，移除页面自带的AppBar和Scaffold，只保留内容
+    // 对于手机端，为首页和设置页添加毛玻璃AppBar
     if (page is HomeContentEnhanced) {
       return const _HomeContentWrapper();
     } else if (page is SettingsPage) {
@@ -281,6 +350,71 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ImportBookPage()),
+    );
+  }
+
+  // 导航头部组件 - 专为平板和桌面优化
+  Widget _buildNavigationHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 24, 12, 16),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Theme.of(context).colorScheme.primary,
+                  Theme.of(context).colorScheme.secondary,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Theme.of(context).colorScheme.primary.withOpacityValues(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(
+              Icons.auto_stories_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
+          if (ResponsiveHelper.getValue(context, mobile: false, tablet: true, desktop: true)) ...[
+            const SizedBox(height: 12),
+            Text(
+              '小元读书',
+              style: TextStyle(
+                fontSize: ResponsiveHelper.getValue(
+                  context, 
+                  mobile: 16.0, 
+                  tablet: 18.0, 
+                  desktop: 20.0
+                ),
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '优雅阅读',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+        ],
+      ),
     );
   }
 }
@@ -343,28 +477,111 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
     }
   }
 
+  void _navigateToDetailedStats() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DetailedStatsPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(
-            onRefresh: _loadAllStats,
-            child: SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                children: [
-                  _buildWelcomeCard(),
-                  const SizedBox(height: 20),
-                  _buildSummaryCards(),
-                  const SizedBox(height: 24),
-                  _buildWeeklyChartCard(),
-                  const SizedBox(height: 24),
-                  _buildRecentActivity(),
-                  const SizedBox(height: 100),
-                ],
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.3), // 增加透明度让毛玻璃更明显
+            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.3),
+            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.2),
+          ],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // 添加背景图案让毛玻璃效果更明显
+          ...List.generate(15, (index) {
+            return Positioned(
+              left: (index * 89.0) % MediaQuery.of(context).size.width,
+              top: (index * 143.0) % MediaQuery.of(context).size.height,
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacityValues(0.06),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            );
+          }),
+          // 主内容
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _loadAllStats,
+                  child: SafeArea(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 80, 16, 130), // 增加顶部padding为毛玻璃AppBar留出空间
+                      children: [
+                        _buildWelcomeCard(),
+                        const SizedBox(height: 20),
+                        _buildSummaryCards(),
+                        const SizedBox(height: 24),
+                        _buildWeeklyChartCard(),
+                        const SizedBox(height: 24),
+                        _buildRecentActivity(),
+                      ],
+                    ),
+                  ),
+                ),
+          // 毛玻璃AppBar - 使用与书库页面相同的实现方式
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: ClipRRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: GlassEffectConfig.appBarBlur,
+                  sigmaY: GlassEffectConfig.appBarBlur,
+                ),
+                child: Container(
+                  height: MediaQuery.of(context).padding.top + 60, // 状态栏高度 + AppBar高度
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface.withOpacityValues(
+                      GlassEffectConfig.appBarOpacity
+                    ),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                        width: 0.5,
+                      ),
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '首页',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
-          );
+          ),
+        ],
+      ),
+    );
   }
 
   // 复制HomeContentEnhanced中的方法
@@ -496,15 +713,24 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
       children: [
         Row(
           children: [
-            Expanded(child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)),
+            Expanded(child: GestureDetector(
+              onTap: () => _navigateToDetailedStats(),
+              child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)
+            )),
             const SizedBox(width: 12),
-            Expanded(child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)),
+            Expanded(child: GestureDetector(
+              onTap: () => _navigateToDetailedStats(),
+              child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)
+            )),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)),
+            Expanded(child: GestureDetector(
+              onTap: () => _navigateToDetailedStats(),
+              child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)
+            )),
             const SizedBox(width: 12),
             Expanded(child: _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple)),
           ],
@@ -522,9 +748,18 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
       mainAxisSpacing: 16,
       childAspectRatio: 1.4,
       children: [
-        _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue),
-        _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange),
-        _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green),
+        GestureDetector(
+          onTap: () => _navigateToDetailedStats(),
+          child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)
+        ),
+        GestureDetector(
+          onTap: () => _navigateToDetailedStats(),
+          child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)
+        ),
+        GestureDetector(
+          onTap: () => _navigateToDetailedStats(),
+          child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)
+        ),
         _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple),
       ],
     );
@@ -873,97 +1108,171 @@ class _SettingsPageWrapperState extends State<_SettingsPageWrapper> {
     await prefs.setBool('keepScreenOn', _keepScreenOn);
     await prefs.setString('fontFamily', _fontFamily);
     await prefs.setInt('autoSaveInterval', _autoSaveInterval);
-  }
-
-  @override
+  }  @override
   Widget build(BuildContext context) {
     final themeNotifier = Provider.of<ThemeNotifier>(context);
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.3), // 增加透明度让毛玻璃更明显
+            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.3),
+            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.2),
+          ],
+        ),
+      ),
+      child: Stack(
         children: [
-          _buildSectionCard(
-            title: '外观设置',
-            icon: Icons.palette_outlined,
-            children: [
-              _buildThemeToggle(themeNotifier, isDarkMode),
-              _buildAnimationToggle(),
-            ],
+          // 添加背景图案让毛玻璃效果更明显
+          ...List.generate(12, (index) {
+            return Positioned(
+              left: (index * 97.0) % MediaQuery.of(context).size.width,
+              top: (index * 157.0) % MediaQuery.of(context).size.height,
+              child: Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacityValues(0.07),
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+            );
+          }),
+          // 主内容
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 80, 16, 130), // 增加顶部padding为毛玻璃AppBar留出空间
+              children: [
+                _buildSectionCard(
+                  title: '外观设置',
+                  icon: Icons.palette_outlined,
+                  children: [
+                    _buildThemeToggle(themeNotifier, isDarkMode),
+                    _buildAnimationToggle(),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _buildSectionCard(
+                  title: '阅读设置',
+                  icon: Icons.auto_stories_outlined,
+                  children: [
+                    _buildSliderSetting(
+                      title: '字体大小',
+                      subtitle: '${_fontSize.round()} pt',
+                      value: _fontSize,
+                      min: 12.0,
+                      max: 32.0,
+                      divisions: 20,
+                      onChanged: (value) => setState(() => _fontSize = value),
+                      icon: Icons.format_size,
+                    ),
+                    _buildSliderSetting(
+                      title: '行间距',
+                      subtitle: _lineSpacing.toStringAsFixed(1),
+                      value: _lineSpacing,
+                      min: 1.0,
+                      max: 3.0,
+                      divisions: 20,
+                      onChanged: (value) => setState(() => _lineSpacing = value),
+                      icon: Icons.format_line_spacing,
+                    ),
+                    _buildSliderSetting(
+                      title: '字符间距',
+                      subtitle: _letterSpacing.toStringAsFixed(1),
+                      value: _letterSpacing,
+                      min: 0.0,
+                      max: 2.0,
+                      divisions: 20,
+                      onChanged: (value) => setState(() => _letterSpacing = value),
+                      icon: Icons.text_fields,
+                    ),
+                    _buildSliderSetting(
+                      title: '页面边距',
+                      subtitle: '${_pageMargin.round()} px',
+                      value: _pageMargin,
+                      min: 8.0,
+                      max: 32.0,
+                      divisions: 24,
+                      onChanged: (value) => setState(() => _pageMargin = value),
+                      icon: Icons.format_indent_increase,
+                    ),
+                    _buildFontFamilySelector(),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _buildSectionCard(
+                  title: '系统设置',
+                  icon: Icons.settings_outlined,
+                  children: [
+                    _buildSwitchSetting(
+                      title: '保持屏幕常亮',
+                      subtitle: '阅读时防止屏幕自动关闭',
+                      value: _keepScreenOn,
+                      onChanged: (value) => setState(() => _keepScreenOn = value),
+                      icon: Icons.stay_current_portrait,
+                    ),
+                    _buildSwitchSetting(
+                      title: '自动保存',
+                      subtitle: '自动保存阅读进度',
+                      value: _enableAutoSave,
+                      onChanged: (value) => setState(() => _enableAutoSave = value),
+                      icon: Icons.save_outlined,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _buildAboutCard(),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          _buildSectionCard(
-            title: '阅读设置',
-            icon: Icons.auto_stories_outlined,
-            children: [
-              _buildSliderSetting(
-                title: '字体大小',
-                subtitle: '${_fontSize.round()} pt',
-                value: _fontSize,
-                min: 12.0,
-                max: 32.0,
-                divisions: 20,
-                onChanged: (value) => setState(() => _fontSize = value),
-                icon: Icons.format_size,
+          // 毛玻璃AppBar - 使用与书库页面相同的实现方式
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: ClipRRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: GlassEffectConfig.appBarBlur,
+                  sigmaY: GlassEffectConfig.appBarBlur,
+                ),
+                child: Container(
+                  height: MediaQuery.of(context).padding.top + 60, // 状态栏高度 + AppBar高度
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface.withOpacityValues(
+                      GlassEffectConfig.appBarOpacity
+                    ),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                        width: 0.5,
+                      ),
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '设置',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              _buildSliderSetting(
-                title: '行间距',
-                subtitle: _lineSpacing.toStringAsFixed(1),
-                value: _lineSpacing,
-                min: 1.0,
-                max: 3.0,
-                divisions: 20,
-                onChanged: (value) => setState(() => _lineSpacing = value),
-                icon: Icons.format_line_spacing,
-              ),
-              _buildSliderSetting(
-                title: '字符间距',
-                subtitle: _letterSpacing.toStringAsFixed(1),
-                value: _letterSpacing,
-                min: 0.0,
-                max: 2.0,
-                divisions: 20,
-                onChanged: (value) => setState(() => _letterSpacing = value),
-                icon: Icons.text_fields,
-              ),
-              _buildSliderSetting(
-                title: '页面边距',
-                subtitle: '${_pageMargin.round()} px',
-                value: _pageMargin,
-                min: 8.0,
-                max: 32.0,
-                divisions: 24,
-                onChanged: (value) => setState(() => _pageMargin = value),
-                icon: Icons.format_indent_increase,
-              ),
-              _buildFontFamilySelector(),
-            ],
+            ),
           ),
-          const SizedBox(height: 20),
-          _buildSectionCard(
-            title: '系统设置',
-            icon: Icons.settings_outlined,
-            children: [
-              _buildSwitchSetting(
-                title: '保持屏幕常亮',
-                subtitle: '阅读时防止屏幕自动关闭',
-                value: _keepScreenOn,
-                onChanged: (value) => setState(() => _keepScreenOn = value),
-                icon: Icons.stay_current_portrait,
-              ),
-              _buildSwitchSetting(
-                title: '自动保存',
-                subtitle: '自动保存阅读进度',
-                value: _enableAutoSave,
-                onChanged: (value) => setState(() => _enableAutoSave = value),
-                icon: Icons.save_outlined,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _buildAboutCard(),
-          const SizedBox(height: 100),
         ],
       ),
     );
