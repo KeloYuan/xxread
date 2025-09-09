@@ -1,6 +1,10 @@
 // 毛玻璃效果配置管理器
 // 集中管理所有界面的毛玻璃效果和透明度设置
 
+import 'package:flutter/material.dart';
+import 'progressive_blur.dart';
+import 'color_extensions.dart';
+
 class GlassEffectConfig {
   // ============ 模糊强度配置 (sigmaX/sigmaY) ============
   
@@ -60,6 +64,35 @@ class GlassEffectConfig {
     blurReduction: 1.4,    // 模糊强度 × 1.4
     opacityIncrease: -0.15, // 透明度 - 0.15
   );
+
+  // ============ 对外静态转发（兼容旧调用） ============
+  static Widget createProgressiveAppBar({
+    required BuildContext context,
+    required Widget child,
+    GlassPreset? preset,
+  }) {
+    return ClipRect(
+      child: GlassEffectHelper._progressiveAppBarInternal(
+        context: context,
+        child: child,
+        preset: preset,
+      ),
+    );
+  }
+
+  static Widget createProgressiveCard({
+    required BuildContext context,
+    required Widget child,
+    BorderRadius? borderRadius,
+    GlassPreset? preset,
+  }) {
+    return GlassEffectHelper.createProgressiveCard(
+      context: context,
+      child: child,
+      borderRadius: borderRadius,
+      preset: preset,
+    );
+  }
 }
 
 // 毛玻璃预设配置
@@ -105,6 +138,114 @@ class GlassEffectHelper {
       'blur': blur * preset.blurReduction,
       'opacity': (opacity + preset.opacityIncrease).clamp(0.0, 1.0),
     };
+  }
+
+  // ============ 渐进模糊效果配置 ============
+  
+  // 创建渐进模糊的AppBar（内部实现，外部通过 ClipRect 包裹后调用）
+  static Widget _progressiveAppBarInternal({
+    required BuildContext context,
+    required Widget child,
+    GlassPreset? preset,
+  }) {
+    preset ??= GlassEffectConfig.standardMode;
+    final config = getAppBarConfig(preset: preset);
+    
+    return ProgressiveBlurPresets.topToBottomBlur(
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']! + 0.1),
+              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']!),
+              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']! - 0.1),
+            ],
+            stops: const [0.0, 0.6, 1.0],
+          ),
+        ),
+        child: child,
+      ),
+      context: context,
+      maxBlur: config['blur']!,
+    );
+  }
+
+  // 创建渐进模糊的卡片
+  static Widget createProgressiveCard({
+    required BuildContext context,
+    required Widget child,
+    BorderRadius? borderRadius,
+    GlassPreset? preset,
+  }) {
+    preset ??= GlassEffectConfig.standardMode;
+    
+    return ProgressiveBlurPresets.radialBlur(
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface.withOpacityValues(GlassEffectConfig.cardOpacity),
+          borderRadius: borderRadius,
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+            width: 1,
+          ),
+        ),
+        child: child,
+      ),
+      context: context,
+      maxBlur: GlassEffectConfig.cardBlur * preset.blurReduction,
+      borderRadius: borderRadius,
+    );
+  }
+
+  // 创建渐进模糊的对话框
+  static Widget createProgressiveDialog({
+    required BuildContext context,
+    required Widget child,
+    BorderRadius? borderRadius,
+    GlassPreset? preset,
+  }) {
+    preset ??= GlassEffectConfig.standardMode;
+    
+    return ProgressiveBlurPresets.edgeBlur(
+      child: child,
+      context: context,
+      maxBlur: GlassEffectConfig.dialogBlur * preset.blurReduction,
+      borderRadius: borderRadius ?? BorderRadius.circular(20),
+    );
+  }
+
+  // 创建渐进模糊的底部导航栏
+  static Widget createProgressiveBottomNav({
+    required BuildContext context,
+    required Widget child,
+    BorderRadius? borderRadius,
+    GlassPreset? preset,
+  }) {
+    preset ??= GlassEffectConfig.standardMode;
+    final config = getNavigationConfig(preset: preset);
+    
+    return ProgressiveBlurPresets.bottomNavigationBlur(
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']! + 0.1),
+              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']!),
+              Colors.transparent,
+            ],
+            stops: const [0.0, 0.7, 1.0],
+          ),
+        ),
+        child: child,
+      ),
+      context: context,
+      maxBlur: config['blur']!,
+      borderRadius: borderRadius,
+    );
   }
 }
 

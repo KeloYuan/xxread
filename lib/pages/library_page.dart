@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/book.dart';
 import '../services/book_dao.dart';
 import 'import_book_page.dart';
@@ -43,132 +44,120 @@ class _LibraryPageState extends State<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        // 移除标题，只保留透明AppBar用于状态栏适配
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        toolbarHeight: 0, // 设置高度为0，完全隐藏AppBar
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemStatusBarContrastEnforced: false,
+        systemNavigationBarContrastEnforced: false,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.1),
-              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.1),
-            ],
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: Text(
+            '书库',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            // 添加背景图案让毛玻璃效果更明显
-            ...List.generate(15, (index) {
-              return Positioned(
-                left: (index * 89.0) % MediaQuery.of(context).size.width,
-                top: (index * 143.0) % MediaQuery.of(context).size.height,
-                child: Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withOpacityValues(0.06),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              );
-            }),
-            // 主内容
-            _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _books.isEmpty
-                    ? _buildEmptyLibrary()
-                    : RefreshIndicator(
-                        onRefresh: _loadBooks,
-                        child: _buildBooksGrid(),
-                      ),
-            // 毛玻璃AppBar - 显示"书库"标题
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: ClipRRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: GlassEffectConfig.appBarBlur,
-                    sigmaY: GlassEffectConfig.appBarBlur,
-                  ),
-                  child: Container(
-                    height: MediaQuery.of(context).padding.top + 60, // 状态栏高度 + AppBar高度
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface.withOpacityValues(
-                        GlassEffectConfig.appBarOpacity
-                      ),
-                      border: Border(
-                        bottom: BorderSide(
-                          color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                          width: 0.5,
-                        ),
-                      ),
-                    ),
-                    child: SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '书库',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          flexibleSpace: GlassEffectConfig.createProgressiveAppBar(
+            context: context,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).colorScheme.outline.withOpacityValues(0.28),
+                    width: 0.5,
                   ),
                 ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
-      // 悬浮添加书籍按钮
-      floatingActionButton: Container(
-        margin: const EdgeInsets.only(bottom: 80), // 向上移动80px
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Theme.of(context).colorScheme.primary.withOpacityValues(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-              spreadRadius: 0,
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              stops: const [0.0, 0.3, 0.6, 1.0],
+              colors: [
+                Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.12),
+                Theme.of(context).colorScheme.surface.withOpacityValues(0.98),
+                Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.08),
+                Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.10),
+              ],
             ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: FloatingActionButton(
-              onPressed: () async {
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const ImportBookPage()),
+          ),
+          child: Stack(
+            children: [
+              // 添加背景图案让毛玻璃效果更明显
+              ...List.generate(15, (index) {
+                return Positioned(
+                  left: (index * 89.0) % MediaQuery.of(context).size.width,
+                  top: (index * 143.0) % MediaQuery.of(context).size.height,
+                  child: Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withOpacityValues(0.06),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
                 );
-                // 导入完成后刷新书籍列表
-                if (result == true || mounted) {
-                  _loadBooks();
-                }
-              },
-              backgroundColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.9),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              heroTag: "add_book_fab", // 添加唯一标识避免冲突
-              child: const Icon(Icons.add, size: 28),
+              }),
+              // 主内容
+              _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _books.isEmpty
+                      ? _buildEmptyLibrary()
+                      : RefreshIndicator(
+                          onRefresh: _loadBooks,
+                          child: _buildBooksGrid(),
+                        ),
+              // 移除顶部自定义 Positioned 毛玻璃，改用 AppBar 的 flexibleSpace
+            ],
+          ),
+        ),
+        // 悬浮添加书籍按钮
+        floatingActionButton: Container(
+          margin: const EdgeInsets.only(bottom: 80), // 向上移动80px
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context).colorScheme.primary.withOpacityValues(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+                spreadRadius: 0,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: FloatingActionButton(
+                onPressed: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ImportBookPage()),
+                  );
+                  // 导入完成后刷新书籍列表
+                  if (result == true || mounted) {
+                    _loadBooks();
+                  }
+                },
+                backgroundColor: Theme.of(context).colorScheme.primary.withOpacityValues(0.9),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                heroTag: "add_book_fab", // 添加唯一标识避免冲突
+                child: const Icon(Icons.add, size: 28),
+              ),
             ),
           ),
         ),
@@ -177,9 +166,10 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Widget _buildEmptyLibrary() {
+    final topInset = MediaQuery.of(context).padding.top;
     return Center(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(40, MediaQuery.of(context).padding.top + 80, 40, 40), // 增加顶部padding为毛玻璃AppBar留出空间
+        padding: EdgeInsets.fromLTRB(40, topInset + kToolbarHeight + 40, 40, 40),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(24),
           // 毛玻璃效果 - 空书架提示卡片
@@ -259,6 +249,7 @@ class _LibraryPageState extends State<LibraryPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = ResponsiveHelper.isDesktop(context);
     final isTablet = ResponsiveHelper.isTablet(context);
+    final topInset = MediaQuery.of(context).padding.top;
     
     // 毛玻璃效果增强 - 网格容器背景
     // 为整个书籍网格添加细微的毛玻璃背景层
@@ -288,8 +279,6 @@ class _LibraryPageState extends State<LibraryPage> {
     }
     
     return Container(
-      // 毛玻璃效果 - 网格容器背景装饰
-      // 为书籍网格添加渐变背景和微妙的纹理效果
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -304,39 +293,38 @@ class _LibraryPageState extends State<LibraryPage> {
         ),
       ),
       child: GridView.builder(
-      padding: EdgeInsets.fromLTRB(
-        16, 
-        MediaQuery.of(context).padding.top + 80, // 增加顶部padding为毛玻璃AppBar留出空间
-        16, 
-        MediaQuery.of(context).padding.bottom + 20
-      ),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: spacing,
-        mainAxisSpacing: spacing + 8,
-        childAspectRatio: childAspectRatio,
-      ),
-      itemCount: _books.length,
-      itemBuilder: (context, index) {
-        final book = _books[index];
-        return _BookCoverItem(
-          book: book,
-          onTap: () async {
-            // 获取包含缓存内容的完整书籍信息
-            final fullBook = await _bookDao.getBookById(book.id!);
-            if (fullBook != null && mounted) {
-              if (context.mounted) {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => ReadingPageEnhanced(book: fullBook)),
-                );
+        padding: EdgeInsets.fromLTRB(
+          16,
+          topInset + kToolbarHeight + 16,
+          16,
+          MediaQuery.of(context).padding.bottom + 20,
+        ),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: spacing,
+          mainAxisSpacing: spacing + 8,
+          childAspectRatio: childAspectRatio,
+        ),
+        itemCount: _books.length,
+        itemBuilder: (context, index) {
+          final book = _books[index];
+          return _BookCoverItem(
+            book: book,
+            onTap: () async {
+              final fullBook = await _bookDao.getBookById(book.id!);
+              if (fullBook != null && mounted) {
+                if (context.mounted) {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => ReadingPageEnhanced(book: fullBook)),
+                  );
+                }
               }
-            }
-            _loadBooks();
-          },
-          onLongPress: () => _showBookOptions(book),
-        );
-      },
+              _loadBooks();
+            },
+            onLongPress: () => _showBookOptions(book),
+          );
+        },
       ),
     );
   }
@@ -364,16 +352,17 @@ class _LibraryPageState extends State<LibraryPage> {
             ),
             child: Wrap(
               children: [
-                // 毛玻璃效果 - 拖拽指示条
-                Container(
-                  margin: const EdgeInsets.only(top: 12, bottom: 8),
-                  alignment: Alignment.center,
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.outline.withOpacityValues(0.3),
-                      borderRadius: BorderRadius.circular(2),
+                // 手势拖拽指示条（仅保留白条本体，无额外纯色背景）
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: Center(
+                    child: Container(
+                      width: 44,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(2.5),
+                      ),
                     ),
                   ),
                 ),
@@ -390,7 +379,7 @@ class _LibraryPageState extends State<LibraryPage> {
                     title: Text('删除书籍', 
                         style: TextStyle(color: Theme.of(context).colorScheme.error)),
                     onTap: () {
-                      Navigator.pop(context);
+                      Navigator.pop(context); // 先关闭底部弹窗
                       _confirmDeleteBook(book);
                     },
                   ),
@@ -407,53 +396,55 @@ class _LibraryPageState extends State<LibraryPage> {
   void _confirmDeleteBook(Book book) {
     showDialog(
       context: context,
-      builder: (context) => ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        // 毛玻璃效果 - 确认对话框
-        // 为删除确认对话框添加精美的毛玻璃背景
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30), // 高强度模糊突出对话框
-          child: AlertDialog(
-            backgroundColor: Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: BorderSide(
-                color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                width: 1,
+      builder: (context) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          // 毛玻璃效果 - 确认对话框
+          // 为删除确认对话框添加精美的毛玻璃背景
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30), // 高强度模糊突出对话框
+            child: AlertDialog(
+              backgroundColor: Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                  width: 1,
+                ),
               ),
-            ),
-            title: Text('确认删除', style: Theme.of(context).textTheme.headlineSmall),
-            content: Text('确定要删除《${book.title}》吗？文件将从设备中永久移除。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          TextButton(
-            onPressed: () async {
-              // Store the Navigator and ScaffoldMessenger before the async gap.
-              final navigator = Navigator.of(context);
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
+              title: Text('确认删除', style: Theme.of(context).textTheme.headlineSmall),
+              content: Text('确定要删除《${book.title}》吗？文件将从设备中永久移除。'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+                TextButton(
+                  onPressed: () async {
+                    // Store the Navigator and ScaffoldMessenger before the async gap.
+                    final navigator = Navigator.of(context);
+                    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-              try {
-                final file = File(book.filePath);
-                if (await file.exists()) {
-                  await file.delete();
-                }
-                await _bookDao.deleteBook(book.id!);
-                
-                navigator.pop();
-                _loadBooks();
-                scaffoldMessenger.showSnackBar(
-                  SnackBar(content: Text('《${book.title}》已删除')),
-                );
-              } catch (e) {
-                // Handle error
-              }
-            },
-            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    try {
+                      final file = File(book.filePath);
+                      if (await file.exists()) {
+                        await file.delete();
+                      }
+                      await _bookDao.deleteBook(book.id!);
+                      
+                      navigator.pop();
+                      _loadBooks();
+                      scaffoldMessenger.showSnackBar(
+                        SnackBar(content: Text('《${book.title}》已删除')),
+                      );
+                    } catch (e) {
+                      // Handle error
+                    }
+                  },
+                  child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+              ],
+            ),
           ),
-        ],
-        ),
-      ),
-      ),
+        );
+      },
     );
   }
 }

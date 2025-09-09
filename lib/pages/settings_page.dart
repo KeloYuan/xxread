@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import '../utils/color_extensions.dart';
+import '../utils/glass_config.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -61,17 +62,14 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        flexibleSpace: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                    width: 0.5,
-                  ),
+        flexibleSpace: GlassEffectConfig.createProgressiveAppBar(
+          context: context,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                  width: 0.5,
                 ),
               ),
             ),
@@ -81,11 +79,14 @@ class _SettingsPageState extends State<SettingsPage> {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: const [0.0, 0.3, 0.7, 1.0],
             colors: [
-              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.1),
-              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.1),
+              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.12),
+              Theme.of(context).colorScheme.surface.withOpacityValues(0.98),
+              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.08),
+              Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.15),
             ],
           ),
         ),

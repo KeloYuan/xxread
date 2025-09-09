@@ -81,9 +81,13 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
+            stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
             colors: [
-              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.1),
-              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.1),
+              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.12),
+              Theme.of(context).colorScheme.surface.withOpacityValues(0.98),
+              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.08),
+              Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.10),
+              Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
             ],
           ),
         ),
@@ -491,10 +495,13 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
+          stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
           colors: [
-            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.3), // 增加透明度让毛玻璃更明显
-            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.3),
-            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.2),
+            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.15),
+            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.08),
+            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.12),
+            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.06),
+            Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
           ],
         ),
       ),
@@ -1116,12 +1123,14 @@ class _SettingsPageWrapperState extends State<_SettingsPageWrapper> {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0.0, 0.3, 0.7, 1.0],
           colors: [
-            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.3), // 增加透明度让毛玻璃更明显
-            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.3),
-            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.2),
+            Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.12),
+            Theme.of(context).colorScheme.surface.withOpacityValues(0.98),
+            Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.08),
+            Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.15),
           ],
         ),
       ),

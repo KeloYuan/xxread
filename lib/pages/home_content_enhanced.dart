@@ -4,6 +4,7 @@ import 'dart:ui';
 import '../services/book_dao.dart';
 import '../services/reading_stats_dao.dart';
 import '../utils/color_extensions.dart';
+import '../utils/glass_config.dart';
 import 'detailed_stats_page.dart';
 
 class HomeContentEnhanced extends StatefulWidget {
@@ -75,17 +76,14 @@ class _HomeContentEnhancedState extends State<HomeContentEnhanced> {
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        flexibleSpace: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                    width: 0.5,
-                  ),
+        flexibleSpace: GlassEffectConfig.createProgressiveAppBar(
+          context: context,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                  width: 0.5,
                 ),
               ),
             ),
@@ -97,9 +95,13 @@ class _HomeContentEnhancedState extends State<HomeContentEnhanced> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
+            stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
             colors: [
-              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.1),
-              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.1),
+              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.15),
+              Theme.of(context).colorScheme.secondaryContainer.withOpacityValues(0.08),
+              Theme.of(context).colorScheme.tertiaryContainer.withOpacityValues(0.12),
+              Theme.of(context).colorScheme.primaryContainer.withOpacityValues(0.06),
+              Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
             ],
           ),
         ),
