@@ -159,7 +159,6 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
-      // 毛玻璃效果应用栏
       appBar: AppBar(
         title: Text(
           '阅读统计详情',
@@ -171,28 +170,12 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        flexibleSpace: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: GlassEffectConfig.appBarBlur,
-              sigmaY: GlassEffectConfig.appBarBlur,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withOpacityValues(
-                  GlassEffectConfig.appBarOpacity
-                ),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
-                    width: 0.5,
-                  ),
-                ),
-              ),
-            ),
+        flexibleSpace: GlassEffectConfig.createProgressiveAppBar(
+          context: context,
+          child: Container(
+            // 可在此加入底部分割线，已在TabBar容器里单独处理
           ),
         ),
-        // 时间范围选择按钮
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 16),
@@ -231,30 +214,30 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
             ),
           ),
         ],
-        // Tab标签栏
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
-          child: ClipRRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withOpacityValues(0.7),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  tabs: const [
-                    Tab(text: '总览'),
-                    Tab(text: '图表'),
-                    Tab(text: '书籍'),
-                    Tab(text: '成就'),
-                  ],
-                  labelColor: Theme.of(context).colorScheme.primary,
-                  unselectedLabelColor: Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
-                  indicatorColor: Theme.of(context).colorScheme.primary,
-                  indicatorWeight: 3,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.18),
+                  width: 0.6,
                 ),
               ),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: '总览'),
+                Tab(text: '图表'),
+                Tab(text: '书籍'),
+                Tab(text: '成就'),
+              ],
+              labelColor: Theme.of(context).colorScheme.primary,
+              unselectedLabelColor: Theme.of(context).colorScheme.onSurface.withOpacityValues(0.6),
+              indicatorColor: Theme.of(context).colorScheme.primary,
+              indicatorWeight: 3,
             ),
           ),
         ),
