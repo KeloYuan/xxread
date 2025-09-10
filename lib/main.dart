@@ -19,11 +19,16 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   }
 
-  // 设置系统UI样式 - 透明且关闭对比度强制，提高与自定义毛玻璃的一致性
+  // 强制启用边到边沉浸式模式
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.edgeToEdge,
+  );
+
+  // 设置系统UI样式 - 完全透明沉浸式
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light, // Android: 白色图标
-    statusBarBrightness: Brightness.dark, // iOS: 浅色内容
+    statusBarIconBrightness: Brightness.light, 
+    statusBarBrightness: Brightness.dark, 
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.light,
     systemNavigationBarDividerColor: Colors.transparent,
@@ -31,8 +36,15 @@ void main() {
     systemNavigationBarContrastEnforced: false,
   ));
 
-  // 启用 edgeToEdge，让内容延伸到系统栏
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // 强制设置沉浸式导航栏
+  if (!kIsWeb && Platform.isAndroid) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarContrastEnforced: false,
+    ));
+  }
   
   runApp(
     ChangeNotifierProvider(
@@ -40,24 +52,42 @@ void main() {
       child: const XxReadApp(),
     ),
   );
-
-  // 再次应用一次，避免被主题/页面覆盖
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    statusBarBrightness: Brightness.dark,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarIconBrightness: Brightness.light,
-    systemNavigationBarDividerColor: Colors.transparent,
-    systemStatusBarContrastEnforced: false,
-    systemNavigationBarContrastEnforced: false,
-  ));
 }
 
 // 使用Flutter内置的调试日志
 void debugLog(String message) {
   if (kDebugMode) {
     debugPrint(message);
+  }
+}
+
+// 动态更新系统栏样式的函数 - 强制沉浸式
+void _updateSystemUIOverlay(bool isDarkMode) {
+  // 首先重新启用边到边模式
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  
+  // 然后设置样式
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark, 
+    statusBarBrightness: isDarkMode ? Brightness.dark : Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarContrastEnforced: false,
+  ));
+  
+  // 强制再次应用Android导航栏设置
+  if (!kIsWeb && Platform.isAndroid) {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      ));
+    });
   }
 }
 
@@ -80,6 +110,10 @@ class ThemeNotifier extends ChangeNotifier {
     _themeMode = isDarkMode ? ThemeMode.dark : ThemeMode.light;
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isDarkMode', isDarkMode);
+    
+    // 切换主题时同时更新系统栏样式
+    _updateSystemUIOverlay(isDarkMode);
+    
     notifyListeners();
   }
 }
@@ -90,6 +124,9 @@ class XxReadApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeNotifier = Provider.of<ThemeNotifier>(context);
+    
+    // 动态设置系统栏样式根据主题
+    _updateSystemUIOverlay(themeNotifier.themeMode == ThemeMode.dark);
 
     return MaterialApp(
       title: '小元读书',

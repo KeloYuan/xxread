@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,91 @@ import '../main.dart';
 
 class HomePageResponsive extends StatefulWidget {
   const HomePageResponsive({super.key});
+  // 添加统一底部弹窗工具（小白条沉浸式）
+  static Future<T?> showGlassBottomSheet<T>({
+    required BuildContext context,
+    required WidgetBuilder builder,
+    bool isScrollControlled = false,
+    bool enableDrag = true,
+    bool useRootNavigator = true,
+    bool ignoreSafeArea = false, // 若为 true 则内容完全沉浸到底部（手势区），内部自行处理底部 padding
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      isScrollControlled: isScrollControlled,
+      useSafeArea: false, // 我们自己控制
+      enableDrag: enableDrag,
+      useRootNavigator: useRootNavigator,
+      builder: (ctx) {
+        final media = MediaQuery.of(ctx);
+        final bottomInset = media.viewInsets.bottom; // 键盘
+        final safeBottom = media.padding.bottom;
+
+        // 小白条：独立悬浮（只渲染白条本体）
+        final handle = Positioned(
+          top: 8,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+        );
+
+        // 内容毛玻璃容器
+        final content = Align(
+          alignment: Alignment.bottomCenter,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: GlassEffectConfig.modalBlur,
+                sigmaY: GlassEffectConfig.modalBlur,
+              ),
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 180),
+                padding: EdgeInsets.only(
+                  bottom: (ignoreSafeArea ? 0 : safeBottom) + 12 + bottomInset,
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(ctx).colorScheme.surface.withOpacityValues(
+                      GlassEffectConfig.modalOpacity,
+                    ),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                    border: Border(
+                      top: BorderSide(
+                        color: Theme.of(ctx).colorScheme.outline.withOpacityValues(0.15),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: builder(ctx),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        return Stack(
+          children: [
+            // 透明点击区域 (允许点到底部外侧关闭时可扩展)
+            Positioned.fill(child: Container()),
+            content,
+            handle,
+          ],
+        );
+      },
+    );
+  }
 
   @override
   State<HomePageResponsive> createState() => _HomePageResponsiveState();
@@ -52,6 +138,52 @@ class _HomePageResponsiveState extends State<HomePageResponsive> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    _setupPageImmersiveMode();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 每次依赖变化时重新应用沉浸式设置
+    _setupPageImmersiveMode();
+    // 应用基于主题的设置
+    _setupThemeBasedImmersiveMode();
+  }
+
+  // 页面级沉浸式设置
+  void _setupPageImmersiveMode() {
+    // 强制启用边到边模式
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    
+    // 应用基本的沉浸式样式，不依赖context
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark, // 默认深色图标
+      statusBarBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemStatusBarContrastEnforced: false,
+      systemNavigationBarContrastEnforced: false,
+    ));
+  }
+
+  // 基于主题的沉浸式设置 (在didChangeDependencies中调用)
+  void _setupThemeBasedImmersiveMode() {
+    // 获取当前主题状态
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    // 应用基于主题的沉浸式样式
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark,
+      statusBarBrightness: isDarkMode ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: isDarkMode ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemStatusBarContrastEnforced: false,
+      systemNavigationBarContrastEnforced: false,
+    ));
   }
 
   @override
@@ -527,10 +659,9 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
                   onRefresh: _loadAllStats,
-                  child: SafeArea(
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 80, 16, 130), // 增加顶部padding为毛玻璃AppBar留出空间
-                      children: [
+                  child: ListView(
+                    padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 60, 16, MediaQuery.of(context).padding.bottom + 90), // 沉浸式padding：顶部=状态栏+AppBar，底部=导航栏+额外间距
+                    children: [
                         _buildWelcomeCard(),
                         const SizedBox(height: 20),
                         _buildSummaryCards(),
@@ -539,7 +670,6 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
                         const SizedBox(height: 24),
                         _buildRecentActivity(),
                       ],
-                    ),
                   ),
                 ),
           // 毛玻璃AppBar - 使用与书库页面相同的实现方式
@@ -566,18 +696,16 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
                       ),
                     ),
                   ),
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '首页',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 16, 16, 16), // 沉浸式：状态栏高度 + 16px间距
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '首页',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),
@@ -722,21 +850,21 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
           children: [
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)
+              child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue),
             )),
             const SizedBox(width: 12),
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)
+              child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange),
             )),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)
+              child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green),
             )),
             const SizedBox(width: 12),
             Expanded(child: _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple)),
@@ -757,15 +885,15 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
       children: [
         GestureDetector(
           onTap: () => _navigateToDetailedStats(),
-          child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)
+          child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue),
         ),
         GestureDetector(
           onTap: () => _navigateToDetailedStats(),
-          child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)
+          child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange),
         ),
         GestureDetector(
           onTap: () => _navigateToDetailedStats(),
-          child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)
+          child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green),
         ),
         _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple),
       ],
@@ -1152,10 +1280,9 @@ class _SettingsPageWrapperState extends State<_SettingsPageWrapper> {
             );
           }),
           // 主内容
-          SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 80, 16, 130), // 增加顶部padding为毛玻璃AppBar留出空间
-              children: [
+          ListView(
+            padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 60, 16, MediaQuery.of(context).padding.bottom + 90), // 沉浸式padding
+            children: [
                 _buildSectionCard(
                   title: '外观设置',
                   icon: Icons.palette_outlined,
@@ -1236,7 +1363,6 @@ class _SettingsPageWrapperState extends State<_SettingsPageWrapper> {
                 const SizedBox(height: 20),
                 _buildAboutCard(),
               ],
-            ),
           ),
           // 毛玻璃AppBar - 使用与书库页面相同的实现方式
           Positioned(
@@ -1262,18 +1388,16 @@ class _SettingsPageWrapperState extends State<_SettingsPageWrapper> {
                       ),
                     ),
                   ),
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '设置',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 16, 16, 16), // 沉浸式：状态栏高度 + 16px间距
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '设置',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),

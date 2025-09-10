@@ -34,7 +34,8 @@
       "Bash(timeout:*)",
       "Bash(git checkout:*)",
       "Bash(rd:*)",
-      "Bash(./gradlew --stop)"
+      "Bash(./gradlew --stop)",
+      "Bash(./gradlew:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
