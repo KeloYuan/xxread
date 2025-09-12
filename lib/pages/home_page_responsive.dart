@@ -19,91 +19,6 @@ import '../main.dart';
 
 class HomePageResponsive extends StatefulWidget {
   const HomePageResponsive({super.key});
-  // 添加统一底部弹窗工具（小白条沉浸式）
-  static Future<T?> showGlassBottomSheet<T>({
-    required BuildContext context,
-    required WidgetBuilder builder,
-    bool isScrollControlled = false,
-    bool enableDrag = true,
-    bool useRootNavigator = true,
-    bool ignoreSafeArea = false, // 若为 true 则内容完全沉浸到底部（手势区），内部自行处理底部 padding
-  }) {
-    return showModalBottomSheet<T>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
-      isScrollControlled: isScrollControlled,
-      useSafeArea: false, // 我们自己控制
-      enableDrag: enableDrag,
-      useRootNavigator: useRootNavigator,
-      builder: (ctx) {
-        final media = MediaQuery.of(ctx);
-        final bottomInset = media.viewInsets.bottom; // 键盘
-        final safeBottom = media.padding.bottom;
-
-        // 小白条：独立悬浮（只渲染白条本体）
-        final handle = Positioned(
-          top: 8,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              width: 44,
-              height: 5,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.92),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-          ),
-        );
-
-        // 内容毛玻璃容器
-        final content = Align(
-          alignment: Alignment.bottomCenter,
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassEffectConfig.modalBlur,
-                sigmaY: GlassEffectConfig.modalBlur,
-              ),
-              child: AnimatedPadding(
-                duration: const Duration(milliseconds: 180),
-                padding: EdgeInsets.only(
-                  bottom: (ignoreSafeArea ? 0 : safeBottom) + 12 + bottomInset,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(ctx).colorScheme.surface.withOpacityValues(
-                      GlassEffectConfig.modalOpacity,
-                    ),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                    border: Border(
-                      top: BorderSide(
-                        color: Theme.of(ctx).colorScheme.outline.withOpacityValues(0.15),
-                        width: 1,
-                      ),
-                    ),
-                  ),
-                  child: builder(ctx),
-                ),
-              ),
-            ),
-          ),
-        );
-
-        return Stack(
-          children: [
-            // 透明点击区域 (允许点到底部外侧关闭时可扩展)
-            Positioned.fill(child: Container()),
-            content,
-            handle,
-          ],
-        );
-      },
-    );
-  }
 
   @override
   State<HomePageResponsive> createState() => _HomePageResponsiveState();
@@ -659,6 +574,7 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
                   onRefresh: _loadAllStats,
+                  edgeOffset: MediaQuery.of(context).padding.top + 40, // 下拉刷新UI往下移，避开状态栏和AppBar
                   child: ListView(
                     padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 60, 16, MediaQuery.of(context).padding.bottom + 90), // 沉浸式padding：顶部=状态栏+AppBar，底部=导航栏+额外间距
                     children: [
@@ -850,21 +766,21 @@ class _HomeContentWrapperState extends State<_HomeContentWrapper> {
           children: [
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue),
+              child: _StatCard(title: '今日阅读', value: '$todayMinutes', unit: '分钟', icon: Icons.today, color: Colors.blue)
             )),
             const SizedBox(width: 12),
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange),
+              child: _StatCard(title: '本周阅读', value: '$weekMinutes', unit: '分钟', icon: Icons.calendar_view_week, color: Colors.orange)
             )),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(child: GestureDetector(
               onTap: () => _navigateToDetailedStats(),
-              child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green),
+              child: _StatCard(title: '累计阅读', value: '$totalMinutes', unit: '分钟', icon: Icons.history, color: Colors.green)
             )),
             const SizedBox(width: 12),
             Expanded(child: _StatCard(title: '书架藏书', value: '$_bookCount', unit: '本', icon: Icons.book, color: Colors.purple)),

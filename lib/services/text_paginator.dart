@@ -76,11 +76,13 @@ List<String> _paginateInIsolate(Map<String, dynamic> params) {
     }
   }
 
-  // 调试输出
-  print('📖 分页完成: 总共${pages.length}页，文本长度${text.length}字符');
-  for (int i = 0; i < math.min(3, pages.length); i++) {
-    final page = pages[i];
-    print('📄 第${i+1}页: ${page.length}字符, 开头: "${page.substring(0, math.min(10, page.length))}"');
+  // 调试输出 - 仅在debug模式启用
+  if (kDebugMode) {
+    debugPrint('📖 分页完成: 总共${pages.length}页，文本长度${text.length}字符');
+    for (int i = 0; i < math.min(3, pages.length); i++) {
+      final page = pages[i];
+      debugPrint('📄 第${i+1}页: ${page.length}字符, 开头: "${page.substring(0, math.min(10, page.length))}"');
+    }
   }
 
   return pages;

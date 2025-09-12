@@ -70,12 +70,16 @@ class GlassEffectConfig {
     required BuildContext context,
     required Widget child,
     GlassPreset? preset,
+    bool enableBlur = true, // 新增
+    double? opacityScale,   // 新增：调整透明度强度
   }) {
     return ClipRect(
       child: GlassEffectHelper._progressiveAppBarInternal(
         context: context,
         child: child,
         preset: preset,
+        enableBlur: enableBlur,
+        opacityScale: opacityScale,
       ),
     );
   }
@@ -85,12 +89,14 @@ class GlassEffectConfig {
     required Widget child,
     BorderRadius? borderRadius,
     GlassPreset? preset,
+    bool enableBlur = true, // 新增：可关闭毛玻璃
   }) {
     return GlassEffectHelper.createProgressiveCard(
       context: context,
       child: child,
       borderRadius: borderRadius,
       preset: preset,
+      enableBlur: enableBlur,
     );
   }
 }
@@ -147,10 +153,30 @@ class GlassEffectHelper {
     required BuildContext context,
     required Widget child,
     GlassPreset? preset,
+    bool enableBlur = true,
+    double? opacityScale,
   }) {
     preset ??= GlassEffectConfig.standardMode;
     final config = getAppBarConfig(preset: preset);
-    
+    final scaledOpacity = (opacityScale != null)
+        ? (config['opacity']! * opacityScale).clamp(0.0, 1.0)
+        : config['opacity']!;
+
+    if (!enableBlur) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface.withOpacityValues(scaledOpacity),
+          border: Border(
+            bottom: BorderSide(
+              color: Theme.of(context).colorScheme.outline.withOpacityValues(0.16),
+              width: 0.5,
+            ),
+          ),
+        ),
+        child: child,
+      );
+    }
+
     return ProgressiveBlurPresets.topToBottomBlur(
       child: Container(
         decoration: BoxDecoration(
@@ -158,9 +184,9 @@ class GlassEffectHelper {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']! + 0.1),
-              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']!),
-              Theme.of(context).colorScheme.surface.withOpacityValues(config['opacity']! - 0.1),
+              Theme.of(context).colorScheme.surface.withOpacityValues(scaledOpacity + 0.08),
+              Theme.of(context).colorScheme.surface.withOpacityValues(scaledOpacity),
+              Theme.of(context).colorScheme.surface.withOpacityValues((scaledOpacity - 0.1).clamp(0.0, 1.0)),
             ],
             stops: const [0.0, 0.6, 1.0],
           ),
@@ -178,8 +204,31 @@ class GlassEffectHelper {
     required Widget child,
     BorderRadius? borderRadius,
     GlassPreset? preset,
+    bool enableBlur = true, // 新增
   }) {
     preset ??= GlassEffectConfig.standardMode;
+
+    if (!enableBlur) {
+      // 使用更清晰的实体卡片样式
+      return Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface.withOpacityValues(0.98),
+          borderRadius: borderRadius,
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outline.withOpacityValues(0.16),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).colorScheme.shadow.withOpacityValues(0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: child,
+      );
+    }
     
     return ProgressiveBlurPresets.radialBlur(
       child: Container(

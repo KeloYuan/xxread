@@ -41,9 +41,11 @@ class ProgressiveBlur extends StatelessWidget {
     return Stack(
       children: [
         content,
-        // 渐进模糊层
+        // 渐进模糊层（忽略指针，避免遮挡交互）
         Positioned.fill(
-          child: _buildProgressiveBlurOverlay(context),
+          child: IgnorePointer(
+            child: _buildProgressiveBlurOverlay(context),
+          ),
         ),
       ],
     );
@@ -64,10 +66,11 @@ class ProgressiveBlur extends StatelessWidget {
                 ? gradientColors 
                 : [
                     Colors.transparent,
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.1),
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.3),
+                    // 降低默认覆盖层不透明度，减少内容发灰
+                    Theme.of(context).colorScheme.surface.withOpacityValues(0.06),
+                    Theme.of(context).colorScheme.surface.withOpacityValues(0.12),
                   ],
-            stops: stops ?? [0.0, 0.5, 1.0],
+            stops: stops ?? [0.0, 0.55, 1.0],
           ),
         ),
       ),
@@ -79,6 +82,9 @@ class ProgressiveBlur extends StatelessWidget {
         child: overlay,
       );
     }
+
+    // 统一裁剪模糊区域，避免不同图层混合造成的竖向接缝
+    overlay = ClipRect(child: overlay);
 
     return overlay;
   }
@@ -99,9 +105,10 @@ class ProgressiveBlurPresets {
       beginAlignment: Alignment.topCenter,
       endAlignment: Alignment.bottomCenter,
       gradientColors: [
-        Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
-        Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
+        // 以透明开始，减少整体发灰，解决顶栏下方发暗问题
+        Colors.transparent,
         Theme.of(context).colorScheme.surface.withOpacityValues(0.6),
+        Theme.of(context).colorScheme.surface.withOpacityValues(0.4),
       ],
       stops: const [0.0, 0.6, 1.0],
       borderRadius: borderRadius,
@@ -122,19 +129,24 @@ class ProgressiveBlurPresets {
         Positioned.fill(
           child: ClipRRect(
             borderRadius: borderRadius ?? BorderRadius.zero,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: maxBlur * 0.7, sigmaY: maxBlur * 0.7),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.center,
-                    radius: 0.8,
-                    colors: [
-                      Colors.transparent,
-                      Theme.of(context).colorScheme.surface.withOpacityValues(0.1),
-                      Theme.of(context).colorScheme.surface.withOpacityValues(0.4),
-                    ],
-                    stops: const [0.0, 0.7, 1.0],
+            child: IgnorePointer(
+              // 覆盖层忽略指针，防止遮挡按钮点击
+              child: BackdropFilter(
+                // 降低模糊强度，避免内容变糊
+                filter: ImageFilter.blur(sigmaX: maxBlur * 0.4, sigmaY: maxBlur * 0.4),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment.center,
+                      radius: 0.85,
+                      colors: [
+                        Colors.transparent,
+                        // 明显降低覆盖层不透明度
+                        Theme.of(context).colorScheme.surface.withOpacityValues(0.04),
+                        Theme.of(context).colorScheme.surface.withOpacityValues(0.08),
+                      ],
+                      stops: const [0.0, 0.75, 1.0],
+                    ),
                   ),
                 ),
               ),
@@ -164,18 +176,20 @@ class ProgressiveBlurPresets {
         Positioned.fill(
           child: ClipRRect(
             borderRadius: borderRadius ?? BorderRadius.zero,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.9),
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.7),
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.8),
-                    Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
-                  ],
-                  stops: const [0.0, 0.3, 0.7, 1.0],
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Theme.of(context).colorScheme.surface.withOpacityValues(0.85),
+                      Theme.of(context).colorScheme.surface.withOpacityValues(0.65),
+                      Theme.of(context).colorScheme.surface.withOpacityValues(0.7),
+                      Theme.of(context).colorScheme.surface.withOpacityValues(0.9),
+                    ],
+                    stops: const [0.0, 0.3, 0.7, 1.0],
+                  ),
                 ),
               ),
             ),
@@ -198,8 +212,8 @@ class ProgressiveBlurPresets {
       beginAlignment: Alignment.bottomCenter,
       endAlignment: Alignment.topCenter,
       gradientColors: [
-        Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
-        Theme.of(context).colorScheme.surface.withOpacityValues(0.7),
+        Theme.of(context).colorScheme.surface.withOpacityValues(0.75),
+        Theme.of(context).colorScheme.surface.withOpacityValues(0.5),
         Colors.transparent,
       ],
       stops: const [0.0, 0.6, 1.0],
@@ -258,6 +272,9 @@ class AdvancedProgressiveBlur extends StatelessWidget {
     if (borderRadius != null) {
       layerWidget = ClipRRect(borderRadius: borderRadius!, child: layerWidget);
     }
+
+    // 增加裁剪，避免多层混合时出现分割线
+    layerWidget = ClipRect(child: layerWidget);
 
     return layerWidget;
   }

@@ -117,4 +117,27 @@ class ReadingStatsDao {
       'maxSessionMinutes': (maxDuration / 60).round(),
     };
   }
+
+  // 获取指定日期范围内的每日统计数据
+  Future<List<Map<String, dynamic>>> getDailyStatsRange(DateTime startDate, DateTime endDate) async {
+    final db = await dbService.database;
+    
+    final startDateStr = startDate.toIso8601String().split('T').first;
+    final endDateStr = endDate.toIso8601String().split('T').first;
+    
+    final result = await db.query(
+      'reading_stats',
+      where: 'date >= ? AND date <= ?',
+      whereArgs: [startDateStr, endDateStr],
+      orderBy: 'date ASC',
+    );
+    
+    // 转换为统一格式，添加缺失的字段
+    return result.map((row) => {
+      'date': row['date'],
+      'duration': row['durationInSeconds'], // 保持秒为单位，在上层转换
+      'pages': 0, // 由于当前数据库结构中没有页数记录，暂时设为0
+      'books_read': 0, // 由于当前数据库结构中没有完成书籍记录，暂时设为0
+    }).toList();
+  }
 }

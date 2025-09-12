@@ -82,28 +82,61 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
   }
 
   Future<void> _loadOverallStats() async {
-    // 使用现有的方法来获取统计数据
+    // 使用真实的数据库查询
     final summaryStats = await _statsDao.getSummaryStats();
+    final achievementStats = await _statsDao.getAchievementStats();
+    final bookCount = await _bookDao.getBooksCount();
+    
     final totalMinutes = (summaryStats['total'] ?? 0) ~/ 60;
-    // final todayMinutes = (summaryStats['today'] ?? 0) ~/ 60;
-    // final weekMinutes = (summaryStats['week'] ?? 0) ~/ 60;
+    
+    // 计算总页数 - 基于所有书籍的currentPage总和
+    final books = await _bookDao.getAllBooks();
+    final totalPages = books.fold<int>(0, (sum, book) => sum + book.currentPage);
     
     setState(() => _overallStats = {
       'totalReadingTime': totalMinutes,
-      'totalPages': 1250, // 模拟数据
-      'totalBooks': 15, // 模拟数据  
-      'streak': 7, // 模拟数据
+      'totalPages': totalPages, // 真实数据：所有书籍已读页数总和
+      'totalBooks': bookCount, // 真实数据：书架中的书籍总数
+      'streak': achievementStats['consecutiveDays'] ?? 0, // 真实数据：连续阅读天数
     });
   }
 
   Future<void> _loadDailyStats() async {
-    // 使用模拟数据生成每日统计
-    setState(() => _dailyStats = List.generate(30, (index) => {
-      'date': DateTime.now().subtract(Duration(days: 29 - index)).toIso8601String().split('T').first,
-      'readingTime': 15 + (index % 10) * 5, // 15-60分钟
-      'pagesRead': 10 + (index % 8) * 3, // 10-31页
-      'booksRead': index % 7 == 0 ? 1 : 0, // 偶尔完成一本书
-    }));
+    // 使用真实的每日统计数据
+    final endDate = DateTime.now();
+    final startDate = endDate.subtract(const Duration(days: 30));
+    
+    final realDailyStats = await _statsDao.getDailyStatsRange(startDate, endDate);
+    
+    // 构建完整的30天数据，没有数据的日期填充为0
+    final dailyStatsMap = <String, Map<String, dynamic>>{};
+    
+    // 先填充真实数据
+    for (final stat in realDailyStats) {
+      final dateStr = stat['date'] as String;
+      dailyStatsMap[dateStr] = {
+        'date': dateStr,
+        'readingTime': (stat['duration'] ?? 0) ~/ 60, // 转换为分钟
+        'pagesRead': stat['pages'] ?? 0,
+        'booksRead': stat['books_read'] ?? 0,
+      };
+    }
+    
+    // 填充空白日期
+    final completeStats = <Map<String, dynamic>>[];
+    for (int i = 29; i >= 0; i--) {
+      final date = endDate.subtract(Duration(days: i));
+      final dateStr = date.toIso8601String().split('T').first;
+      
+      completeStats.add(dailyStatsMap[dateStr] ?? {
+        'date': dateStr,
+        'readingTime': 0,
+        'pagesRead': 0,
+        'booksRead': 0,
+      });
+    }
+    
+    setState(() => _dailyStats = completeStats);
   }
 
   /*
@@ -131,16 +164,19 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
     final bookStats = <Map<String, dynamic>>[];
     
     for (final book in books) {
-      // 模拟阅读时间数据
-      final readingTime = (book.currentPage * 0.5).toInt(); // 假设每页0.5分钟
+      // 基于真实阅读进度计算统计数据
       final progress = book.totalPages > 0 ? book.currentPage / book.totalPages : 0.0;
+      
+      // 根据书籍阅读进度和估算阅读速度计算阅读时间
+      // 假设平均阅读速度为每页2分钟，根据已读页数计算
+      final estimatedReadingTime = book.currentPage * 2; // 每页2分钟
       
       bookStats.add({
         'book': book,
-        'readingTime': readingTime,
+        'readingTime': estimatedReadingTime, // 基于已读页数的估算时间
         'progress': progress,
-        'pagesRead': book.currentPage,
-        'totalPages': book.totalPages,
+        'pagesRead': book.currentPage, // 真实已读页数
+        'totalPages': book.totalPages, // 真实总页数
       });
     }
     
@@ -435,9 +471,10 @@ class _DetailedStatsPageState extends State<DetailedStatsPage>
 
   // 今日阅读进度
   Widget _buildTodayProgress() {
-    final todayStats = _dailyStats.isNotEmpty ? _dailyStats.first : {'readingTime': 0, 'pagesRead': 0};
-    final todayTime = todayStats['readingTime'] ?? 0;
-    final todayPages = todayStats['pagesRead'] ?? 0;
+    // 查找今日数据（最后一个元素应该是今天）
+    final todayData = _dailyStats.isNotEmpty ? _dailyStats.last : {'readingTime': 0, 'pagesRead': 0};
+    final todayTime = todayData['readingTime'] ?? 0;
+    final todayPages = todayData['pagesRead'] ?? 0;
     final targetTime = 60; // 目标60分钟
     final targetPages = 20; // 目标20页
     

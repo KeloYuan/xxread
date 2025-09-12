@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,7 +9,6 @@ import 'reading_page_enhanced.dart';
 import '../utils/responsive_helper.dart';
 import '../utils/color_extensions.dart';
 import '../utils/glass_config.dart';
-import 'home_page_responsive.dart';
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
@@ -330,48 +330,119 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   void _showBookOptions(Book book) {
-    HomePageResponsive.showGlassBottomSheet(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) {
-        return Wrap(
-          children: [
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(ctx).colorScheme.errorContainer.withOpacityValues(0.12),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: Theme.of(ctx).colorScheme.error.withOpacityValues(0.25),
+      backgroundColor: Colors.transparent, // 设置背景透明以支持毛玻璃效果
+      builder: (context) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        // 毛玻璃效果 - 底部弹窗
+        // 为操作选项弹窗创建高级的毛玻璃效果
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25), // 较强模糊创造深度感
+          child: Container(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface.withOpacityValues(0.9),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border(
+                top: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
                   width: 1,
                 ),
               ),
-              child: ListTile(
-                leading: Icon(Icons.delete_outline, color: Theme.of(ctx).colorScheme.error),
-                title: Text(
-                  '删除书籍',
-                  style: TextStyle(
-                    color: Theme.of(ctx).colorScheme.error,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                subtitle: Text(
-                  '该操作不可撤销',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(ctx).colorScheme.error.withOpacityValues(0.7),
-                  ),
-                ),
-                onTap: () async {
-                  Navigator.pop(ctx); // 先关闭弹窗
-                  if (book.id != null) {
-                    await _bookDao.deleteBook(book.id!);
-                    _loadBooks();
-                  }
-                },
-              ),
             ),
-            const SizedBox(height: 4),
-          ],
+            child: Wrap(
+              children: [
+                // 手势拖拽指示条（仅保留白条本体，无额外纯色背景）
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: Center(
+                    child: Container(
+                      width: 44,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(2.5),
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  // 毛玻璃效果 - 列表项容器
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer.withOpacityValues(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline, 
+                        color: Theme.of(context).colorScheme.error),
+                    title: Text('删除书籍', 
+                        style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    onTap: () {
+                      Navigator.pop(context); // 先关闭底部弹窗
+                      _confirmDeleteBook(book);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeleteBook(Book book) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          // 毛玻璃效果 - 确认对话框
+          // 为删除确认对话框添加精美的毛玻璃背景
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30), // 高强度模糊突出对话框
+            child: AlertDialog(
+              backgroundColor: Theme.of(context).colorScheme.surface.withOpacityValues(0.95),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outline.withOpacityValues(0.2),
+                  width: 1,
+                ),
+              ),
+              title: Text('确认删除', style: Theme.of(context).textTheme.headlineSmall),
+              content: Text('确定要删除《${book.title}》吗？文件将从设备中永久移除。'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+                TextButton(
+                  onPressed: () async {
+                    // Store the Navigator and ScaffoldMessenger before the async gap.
+                    final navigator = Navigator.of(context);
+                    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+                    try {
+                      final file = File(book.filePath);
+                      if (await file.exists()) {
+                        await file.delete();
+                      }
+                      await _bookDao.deleteBook(book.id!);
+                      
+                      navigator.pop();
+                      _loadBooks();
+                      scaffoldMessenger.showSnackBar(
+                        SnackBar(content: Text('《${book.title}》已删除')),
+                      );
+                    } catch (e) {
+                      // Handle error
+                    }
+                  },
+                  child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
